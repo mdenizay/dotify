@@ -1,6 +1,6 @@
 # The `.dotify` Project Format
 
-Status: **format version 1** (implemented in `crates/dotify-core/src/format`).
+Status: **format version 2** (implemented in `crates/dotify-core/src/format`).
 
 A `.dotify` file is a ZIP archive. All structured data is JSON (UTF-8); all
 pixel data is stored losslessly as 8-bit RGBA PNG, one image per non-empty
@@ -24,7 +24,7 @@ deflate-compressed.
 ```json
 {
   "format": "dotify",
-  "format_version": 1,
+  "format_version": 2,
   "min_reader_version": 1,
   "generator": "dotify 0.1.0",
   "entries": {
@@ -60,7 +60,8 @@ deflate-compressed.
   ],
   "palette": { "name": "Default", "colors": ["#000000ff", "#1d2b53ff"] },
   "tags": [
-    { "name": "Idle", "from": 1, "to": 1, "direction": "forward", "color": "#5b8cffff" }
+    { "name": "Idle", "from": 1, "to": 1, "direction": "forward", "loop": true,
+      "color": "#5b8cffff" }
   ],
   "export": { "png_scale": 1 },
   "next_id": 3,
@@ -72,7 +73,10 @@ Rules:
 
 - Layer order is bottom → top; frame order is playback order.
 - `from`/`to` in tags are **frame IDs**, so tags survive frame reordering
-  and are independent of pixel data.
+  and are independent of pixel data. `from` never comes after `to` in
+  timeline order (moving frames swaps the endpoints when needed). Tag names
+  are unique. `direction` is `forward`, `reverse` or `ping_pong`; `loop`
+  says whether the range repeats.
 - Cel `x`/`y`/`width`/`height` describe where the trimmed PNG sits inside
   the canvas. Cels that would be fully transparent are omitted.
 - Colors are `#rrggbbaa` (straight alpha).
@@ -93,6 +97,11 @@ On load the reader:
 
 Migrations live in `crates/dotify-core/src/format/migrate.rs`. Every format
 change must add a migration and a test fixture.
+
+| Version | Change | Migration |
+|---------|--------|-----------|
+| 1 | Initial format | – |
+| 2 | Tags gain `loop` | Every v1 tag gets `"loop": true`. `min_reader_version` stays 1: older readers ignore the field. |
 
 ## Atomic writes
 

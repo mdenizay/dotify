@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Timeline playback with loop, once and ping-pong modes, honoring per-frame durations
+- Onion skinning with configurable previous/next frame counts, opacity and tint
+- Animation tags: create, rename, recolor, retime, set direction and loop, delete — all undoable
+- Live preview panel that keeps playing while you draw
+- Export dialog for PNG, spritesheet (grid or row per tag, padding, extrude) + JSON metadata, animated GIF and Godot 4
+- Godot 4 export: spritesheet PNG plus a `SpriteFrames` `.tres` with one animation per tag
+- CLI: `export-sheet`, `export-gif` and `export-godot`
+- Project format version 2: tags gain a `loop` flag (older files open with every tag looping)
+
 ## 0.1.1
 
 - Fix the canvas background and checkerboard keeping the old colors after switching between light and dark themes
