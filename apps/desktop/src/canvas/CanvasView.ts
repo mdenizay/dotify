@@ -1,7 +1,18 @@
-import type { Command, Hex } from "../engine/types";
-import { activeLayer, getEditor, setEditor, toast, useEditor, type ToolId } from "../state/editor";
+import type { Command, Frame, Hex, Layer } from "../engine/types";
+import {
+  activeLayer,
+  getEditor,
+  setEditor,
+  toast,
+  useEditor,
+  type EditorState,
+  type ToolId,
+} from "../state/editor";
 import type { CelCache } from "./CelCache";
 import { rgba, toHex } from "./color";
+import type { FrameStore } from "./FrameStore";
+import { ONION_TINTS, onionFrames } from "./onion";
+import type { Player } from "./playback";
 import { brushOffsets } from "./raster";
 import { drawRulers, RULER_SIZE } from "./rulers";
 import { createTools, type Tool, type ToolHost, type ToolInput } from "./tools";
@@ -9,7 +20,12 @@ import { center, fit, nextZoom, scaleOf, toCanvas, zoomAt, type Viewport } from 
 
 export interface CanvasViewDeps {
   cache: CelCache;
+  /** Composites for onion skins and playback. */
+  frames: FrameStore;
+  player: Player;
   run(command: Command): Promise<unknown>;
+  /** Called before a tool starts, so edits never land on a playing canvas. */
+  stopPlayback(): void;
 }
 
 const DRAW_TOOLS: ToolId[] = ["pencil", "eraser", "fill", "line", "rectangle", "ellipse"];
@@ -105,7 +121,9 @@ export class CanvasView implements ToolHost {
           s.opacityPreview !== p.opacityPreview ||
           s.tool !== p.tool ||
           s.brushSize !== p.brushSize ||
-          s.theme !== p.theme
+          s.theme !== p.theme ||
+          s.onion !== p.onion ||
+          s.activeFrameId !== p.activeFrameId
         ) {
           this.updateCursor();
           this.invalidate();
@@ -114,6 +132,8 @@ export class CanvasView implements ToolHost {
     );
     // Pixels under the cursor can change without the pointer moving.
     this.disposers.push(this.cache.onChange(() => this.updateStatus()));
+    this.disposers.push(deps.frames.onChange(() => this.invalidate()));
+    this.disposers.push(deps.player.onChange(() => this.invalidate()));
     this.updateCursor();
   }
 
@@ -287,16 +307,14 @@ export class CanvasView implements ToolHost {
     ctx.fillRect(vp.ox, vp.oy, w, h);
 
     ctx.imageSmoothingEnabled = false;
-    for (const layer of summary.layers) {
-      if (!layer.visible) continue;
-      const opacity = s.opacityPreview?.layer === layer.id ? s.opacityPreview.value : layer.opacity;
-      ctx.globalAlpha = opacity / 255;
-      if (this.cache.has(layer.id)) {
-        ctx.drawImage(this.cache.surface(layer.id).canvas, vp.ox, vp.oy, w, h);
-      }
-      if (layer.id === s.activeLayerId && !this.cache.preview.empty) {
-        ctx.drawImage(this.cache.preview.canvas, vp.ox, vp.oy, w, h);
-      }
+    const { frames, player } = this.deps;
+    const playing = player.playing ? summary.frames[player.index] : undefined;
+    const composite = playing && frames.get(playing.id);
+    if (composite) {
+      ctx.drawImage(composite, vp.ox, vp.oy, w, h);
+    } else {
+      this.drawOnion(summary.frames, s, w, h);
+      this.drawLayers(summary.layers, s, w, h);
     }
     ctx.globalAlpha = 1;
 
@@ -308,7 +326,7 @@ export class CanvasView implements ToolHost {
     ctx.strokeRect(vp.ox - 0.5, vp.oy - 0.5, w + 1, h + 1);
 
     this.drawMirrorAxes(summary.width, summary.height, scale);
-    this.drawHover(scale);
+    if (!composite) this.drawHover(scale);
     if (s.showRulers) {
       drawRulers(ctx, vp, canvas.width, canvas.height, summary.width, summary.height, this.hover, {
         background: this.colors.panel,
@@ -353,6 +371,37 @@ export class CanvasView implements ToolHost {
     if (!getEditor().showRulers) return false;
     const r = this.canvas.getBoundingClientRect();
     return e.clientX - r.left < RULER_SIZE || e.clientY - r.top < RULER_SIZE;
+  }
+
+  /** Neighbouring frames, faded (and optionally tinted), under the active one. */
+  private drawOnion(frames: Frame[], s: EditorState, w: number, h: number) {
+    const { ctx, vp } = this;
+    const active = frames.findIndex((f) => f.id === s.activeFrameId);
+    for (const o of onionFrames(active, frames.length, s.onion)) {
+      const id = frames[o.index]!.id;
+      const img = s.onion.tint
+        ? this.deps.frames.tinted(id, ONION_TINTS[o.side])
+        : this.deps.frames.get(id);
+      if (!img) continue;
+      ctx.globalAlpha = o.alpha;
+      ctx.drawImage(img, vp.ox, vp.oy, w, h);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  private drawLayers(layers: Layer[], s: EditorState, w: number, h: number) {
+    const { ctx, vp } = this;
+    for (const layer of layers) {
+      if (!layer.visible) continue;
+      const opacity = s.opacityPreview?.layer === layer.id ? s.opacityPreview.value : layer.opacity;
+      ctx.globalAlpha = opacity / 255;
+      if (this.cache.has(layer.id)) {
+        ctx.drawImage(this.cache.surface(layer.id).canvas, vp.ox, vp.oy, w, h);
+      }
+      if (layer.id === s.activeLayerId && !this.cache.preview.empty) {
+        ctx.drawImage(this.cache.preview.canvas, vp.ox, vp.oy, w, h);
+      }
+    }
   }
 
   private drawGrid(cols: number, rows: number, scale: number) {
@@ -473,6 +522,7 @@ export class CanvasView implements ToolHost {
     if (this.overRuler(e)) return;
     const impl = this.tools[tool];
     if (!impl) return;
+    this.deps.stopPlayback();
     this.slot = e.button === 2 ? "secondary" : "primary";
     this.canvas.setPointerCapture(e.pointerId);
     this.active = { tool: impl, pointer: e.pointerId };

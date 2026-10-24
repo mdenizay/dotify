@@ -24,7 +24,7 @@ export function installShortcuts(): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || isTyping() || e.repeat) return;
     const s = getEditor();
-    if (s.newDocOpen || s.exportOpen || s.recovery) return;
+    if (s.newDocOpen || s.exportOpen || s.recovery || s.tagDialog) return;
     const key = e.key.toLowerCase();
     const tool = TOOL_KEYS[key];
     if (tool && !e.altKey) {
@@ -51,14 +51,21 @@ export function installShortcuts(): () => void {
         break;
       case ",":
       case ".": {
+        controller.stopPlayback();
+        const s2 = getEditor();
         const frames = s.session?.summary.frames ?? [];
-        const i = frames.findIndex((f) => f.id === s.activeFrameId);
+        const i = frames.findIndex((f) => f.id === s2.activeFrameId);
         const next = frames[(i + (e.key === "," ? -1 : 1) + frames.length) % frames.length];
         if (next) void controller.selectFrame(next.id);
         break;
       }
       case "N":
         void controller.run({ type: "create_layer" });
+        break;
+      case "Enter":
+        // Buttons handle Enter themselves.
+        if ((e.target as HTMLElement | null)?.tagName === "BUTTON") return;
+        controller.togglePlay();
         break;
       default:
         return;

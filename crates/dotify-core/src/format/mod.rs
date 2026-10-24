@@ -20,7 +20,7 @@ use crate::png_io::{self, PngError};
 use crate::MAX_CANVAS_SIZE;
 
 /// Format version written by this build.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 /// Oldest reader version able to open files written by this build.
 pub const MIN_READER_VERSION: u32 = 1;
 pub const MIMETYPE: &str = "application/x-dotify";
@@ -343,6 +343,15 @@ mod tests {
         .unwrap();
         e.execute(Command::CreateLayer { name: Some("Empty".into()), index: None }).unwrap();
         e.execute(Command::DuplicateFrame { frame: f }).unwrap();
+        e.execute(Command::CreateTag {
+            name: "Blink".into(),
+            from: f,
+            to: f,
+            direction: Some(crate::model::PlaybackDirection::PingPong),
+            looping: Some(false),
+            color: None,
+        })
+        .unwrap();
         e.execute(Command::UpdateLayer {
             layer: l,
             name: None,
@@ -446,6 +455,37 @@ mod tests {
             Some(serde_json::to_vec(&m).unwrap())
         });
         assert_eq!(from_bytes(&newer).unwrap(), sample());
+    }
+
+    /// A version 1 file: tags have no `loop` field and the manifest says v1.
+    fn as_v1(bytes: &[u8]) -> Vec<u8> {
+        let mut zip = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut doc: serde_json::Value =
+            serde_json::from_slice(&read_entry(&mut zip, "document.json", MAX_JSON_BYTES).unwrap()).unwrap();
+        for tag in doc["tags"].as_array_mut().unwrap() {
+            tag.as_object_mut().unwrap().remove("loop");
+        }
+        let doc = serde_json::to_vec(&doc).unwrap();
+        let hash = sha256(&doc);
+        rewrite(bytes, |name, data| match name {
+            "document.json" => Some(doc.clone()),
+            "manifest.json" => {
+                let mut m: serde_json::Value = serde_json::from_slice(&data).unwrap();
+                m["format_version"] = 1.into();
+                m["entries"]["document.json"] = hash.clone().into();
+                Some(serde_json::to_vec(&m).unwrap())
+            }
+            _ => Some(data),
+        })
+    }
+
+    #[test]
+    fn v1_files_migrate_tags_to_looping() {
+        let bytes = to_bytes(&sample(), WriteOptions::default()).unwrap();
+        let doc = from_bytes(&as_v1(&bytes)).unwrap();
+        assert_eq!(doc.tags()[0].name, "Blink");
+        assert!(doc.tags()[0].looping);
+        assert!(!sample().tags()[0].looping);
     }
 
     #[test]

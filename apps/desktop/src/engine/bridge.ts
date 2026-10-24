@@ -3,11 +3,16 @@ import type {
   Command,
   EngineError,
   FrameId,
+  GifExport,
+  GifOptions,
+  GodotFiles,
+  GodotOptions,
   LayerId,
   Outcome,
   Rect,
   RecoveryInfo,
   SessionView,
+  SheetOptions,
 } from "./types";
 
 /** Typed wrappers over the Tauri IPC commands in src-tauri/src/commands.rs. */
@@ -26,8 +31,15 @@ export const engine = {
     const buf = await invoke<ArrayBuffer>("read_cel", { layer, frame, rect: rect ?? null });
     return new Uint8ClampedArray(buf);
   },
+  /** All visible layers of a frame, composited by the engine. */
+  async readFrame(frame: FrameId): Promise<Uint8ClampedArray<ArrayBuffer>> {
+    return new Uint8ClampedArray(await invoke<ArrayBuffer>("read_frame", { frame }));
+  },
   exportPng: (frame: FrameId, scale: number) =>
     invoke<string | null>("export_png", { frame, scale }),
+  exportSheet: (options: SheetOptions) => invoke<string | null>("export_sheet", { options }),
+  exportGif: (options: GifOptions) => invoke<GifExport | null>("export_gif", { options }),
+  exportGodot: (options: GodotOptions) => invoke<GodotFiles | null>("export_godot", { options }),
   recoveryStatus: () => invoke<RecoveryInfo | null>("recovery_status"),
   recoveryRestore: () => invoke<SessionView>("recovery_restore"),
   recoveryDiscard: () => invoke<null>("recovery_discard"),

@@ -3,9 +3,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message } from "@tauri-apps/plugin-dialog";
 import { CelCache } from "../canvas/CelCache";
 import type { CanvasView } from "../canvas/CanvasView";
+import { FrameStore } from "../canvas/FrameStore";
+import { Player, resolveRange } from "../canvas/playback";
 import { engine, errorMessage } from "../engine/bridge";
-import type { Command, FrameId, Outcome, SessionView } from "../engine/types";
-import { getEditor, setEditor, toast } from "../state/editor";
+import type { Command, FrameId, GodotOptions, Outcome, SessionView } from "../engine/types";
+import { getEditor, selectFrames, setEditor, toast, useEditor } from "../state/editor";
 
 /**
  * Coordinates the engine, the render cache and the stores. All engine calls
@@ -13,9 +15,37 @@ import { getEditor, setEditor, toast } from "../state/editor";
  */
 class Controller {
   readonly cache = new CelCache();
+  /** Engine composites, read through the queue so they follow edits. */
+  readonly frames = new FrameStore((f) => this.enqueue(() => engine.readFrame(f)));
+  /** Timeline playback, shown on the canvas. */
+  readonly player = new Player(durations);
+  /** Independent loop in the preview panel; keeps running while editing. */
+  readonly previewPlayer = new Player(durations);
   view: CanvasView | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private initialized: Promise<void> | null = null;
+
+  constructor() {
+    this.player.onChange(() => {
+      const playing = this.player.playing;
+      if (playing === getEditor().playing) return;
+      setEditor({ playing });
+      // Land on the frame that was showing so editing continues there.
+      const frame = selectFrames(getEditor())[this.player.index];
+      if (!playing && frame) void this.selectFrame(frame.id);
+    });
+    // Restart the preview when what it should play changes.
+    useEditor.subscribe((s, p) => {
+      if (s.playTag !== p.playTag || s.playMode !== p.playMode) {
+        if (this.player.playing) this.togglePlay();
+        if (s.previewPlaying) this.startPreview();
+      }
+      if (s.previewPlaying !== p.previewPlaying || s.previewOpen !== p.previewOpen) {
+        if (s.previewPlaying && s.previewOpen) this.startPreview();
+        else this.previewPlayer.pause();
+      }
+    });
+  }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const p = this.queue.then(fn);
@@ -57,9 +87,24 @@ class Controller {
       activeLayerId: !reset && layerOk ? s.activeLayerId : (layers.at(-1)?.id ?? null),
       activeFrameId: !reset && frameOk ? s.activeFrameId : (frames[0]?.id ?? null),
     });
-    if (reset || sizeChanged) this.cache.reset(view.summary.width, view.summary.height);
+    if (reset || sizeChanged) {
+      this.cache.reset(view.summary.width, view.summary.height);
+      this.frames.reset(view.summary.width, view.summary.height);
+    } else this.frames.retain(frames.map((f) => f.id));
+    if (reset) {
+      this.player.pause();
+      setEditor({ playTag: null, frameAnchor: null, tagDialog: null });
+    } else {
+      // Drop references to tags and frames that no longer exist.
+      const s2 = getEditor();
+      if (s2.playTag && !view.summary.tags.some((t) => t.name === s2.playTag))
+        setEditor({ playTag: null });
+      if (s2.frameAnchor != null && !frames.some((f) => f.id === s2.frameAnchor))
+        setEditor({ frameAnchor: null });
+    }
     if (reset || sizeChanged || !frameOk) await this.loadFrame();
     if (reset) this.view?.fitToWindow();
+    if (reset && getEditor().previewPlaying && getEditor().previewOpen) this.startPreview();
   }
 
   /** Read every layer of the active frame from the engine. */
@@ -77,7 +122,12 @@ class Controller {
 
   private async applyOutcome(o: Outcome | null) {
     if (!o?.changed) return;
+    // Visibility, opacity and frame changes can alter any composite.
+    if (o.structure_changed) this.frames.invalidate();
+    else this.frames.invalidate(o.dirty.map((d) => d.frame));
     await this.adopt(await engine.view(), false);
+    // Keep the preview's range valid after frames or tags changed.
+    if (o.structure_changed && this.previewPlayer.playing) this.startPreview();
     const createdLayer = o.created.find((c) => "layer" in c);
     const createdFrame = o.created.find((c) => "frame" in c);
     if (createdLayer && "layer" in createdLayer) setEditor({ activeLayerId: createdLayer.layer });
@@ -95,8 +145,9 @@ class Controller {
   }
 
   /** Execute a command through the shared engine. Errors become toasts. */
-  run = (command: Command): Promise<Outcome | null> =>
-    this.enqueue(async () => {
+  run = (command: Command): Promise<Outcome | null> => {
+    this.stopPlayback();
+    return this.enqueue(async () => {
       try {
         const o = await engine.execute(command);
         await this.applyOutcome(o);
@@ -108,28 +159,75 @@ class Controller {
         return null;
       }
     });
+  };
 
-  undo = () =>
-    this.enqueue(async () => {
+  undo = () => {
+    this.stopPlayback();
+    return this.enqueue(async () => {
       const label = getEditor().session?.summary.undo_label;
       const o = await engine.undo();
       await this.applyOutcome(o);
       if (o && label) toast(`Undo ${label}`);
     });
+  };
 
-  redo = () =>
-    this.enqueue(async () => {
+  redo = () => {
+    this.stopPlayback();
+    return this.enqueue(async () => {
       const label = getEditor().session?.summary.redo_label;
       const o = await engine.redo();
       await this.applyOutcome(o);
       if (o && label) toast(`Redo ${label}`);
     });
+  };
 
-  selectFrame = (frame: FrameId) => {
-    if (getEditor().activeFrameId === frame) return;
+  selectFrame = (frame: FrameId, extend = false) => {
+    const s = getEditor();
+    // Shift-click extends a range from the active frame; a plain click clears it.
+    if (extend) return setEditor({ frameAnchor: frame === s.activeFrameId ? null : frame });
+    if (s.frameAnchor != null) setEditor({ frameAnchor: null });
+    if (s.activeFrameId === frame) return;
     setEditor({ activeFrameId: frame });
     return this.enqueue(() => this.loadFrame());
   };
+
+  // ── Playback ─────────────────────────────────────────────────────────
+
+  private range() {
+    const s = getEditor();
+    const summary = s.session?.summary;
+    if (!summary) return null;
+    return resolveRange(summary.frames, summary.tags, s.playTag, s.playMode);
+  }
+
+  togglePlay = () => {
+    if (this.player.playing) return this.player.pause();
+    const range = this.range();
+    if (!range || range.from === range.to) return;
+    const s = getEditor();
+    const index = selectFrames(s).findIndex((f) => f.id === s.activeFrameId);
+    setEditor({ frameAnchor: null });
+    this.prefetch(range);
+    this.player.play(range, index);
+  };
+
+  /** Start loading every composite of a range so playback doesn't stall. */
+  private prefetch(range: { from: number; to: number }) {
+    const frames = selectFrames(getEditor());
+    for (const f of frames.slice(range.from, range.to + 1)) this.frames.get(f.id);
+  }
+
+  /** Pause timeline playback (before an edit) and select the shown frame. */
+  stopPlayback = () => {
+    if (this.player.playing) this.player.pause();
+  };
+
+  private startPreview() {
+    const range = this.range();
+    if (range) this.prefetch(range);
+    if (range) this.previewPlayer.play(range);
+    else this.previewPlayer.pause();
+  }
 
   // ── Files ────────────────────────────────────────────────────────────
 
@@ -186,7 +284,36 @@ class Controller {
     const frame = getEditor().activeFrameId;
     if (frame == null) return;
     const path = await this.guard(() => engine.exportPng(frame, scale));
-    if (path) toast(`Exported ${path.split("/").pop()}`);
+    if (path) toast(`Exported ${baseName(path)}`);
+  }
+
+  async exportSheet() {
+    const s = getEditor();
+    const path = await this.guard(() =>
+      engine.exportSheet({ ...s.exportSheet, scale: s.exportScale }),
+    );
+    if (path) toast(`Exported ${baseName(path)} and its .json`);
+  }
+
+  async exportGif(tag: string | null) {
+    const out = await this.guard(() => engine.exportGif({ scale: getEditor().exportScale, tag }));
+    if (!out) return;
+    const rounded = out.report.alpha_rounded_pixels;
+    if (rounded > 0)
+      toast(
+        `Exported ${baseName(out.path)}. GIF has no partial transparency: ${rounded} pixels were rounded.`,
+      );
+    else toast(`Exported ${baseName(out.path)}`);
+  }
+
+  async exportGodot() {
+    const s = getEditor();
+    const options: GodotOptions = {
+      sheet: { ...s.exportSheet, scale: s.exportScale },
+      res_dir: s.godotResDir.trim() || null,
+    };
+    const files = await this.guard(() => engine.exportGodot(options));
+    if (files) toast(`Exported ${baseName(files.tres)} for Godot`);
   }
 
   async restoreRecovery() {
@@ -225,6 +352,8 @@ class Controller {
         return this.saveAs();
       case "export_png":
         return setEditor({ exportOpen: true });
+      case "export_godot":
+        return setEditor({ exportOpen: true, exportKind: "godot" });
       case "undo":
         // Native text fields keep their own undo stack.
         return typing ? document.execCommand("undo") : this.undo();
@@ -253,6 +382,14 @@ class Controller {
         return getCurrentWindow().close();
     }
   }
+}
+
+function durations() {
+  return selectFrames(getEditor()).map((f) => f.duration_ms);
+}
+
+function baseName(path: string) {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 export function isTyping(): boolean {

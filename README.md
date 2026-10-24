@@ -4,7 +4,7 @@ A lightweight, open-source pixel art editor and sprite animation studio for
 indie game developers — built so that AI assistants can eventually drive it
 through the same command engine you use by hand.
 
-> **Status: Phase 1 (functional pixel editor).** macOS first; Windows and
+> **Status: Phase 2 (animation and Godot export).** macOS first; Windows and
 > Linux are planned. See the [roadmap](docs/ARCHITECTURE.md#roadmap).
 
 ## What works today
@@ -20,12 +20,19 @@ through the same command engine you use by hand.
   palette (PICO-8 default)
 - Layers: create, duplicate, delete, rename, reorder, visibility, lock,
   opacity
-- Frames: add, duplicate, delete, reorder, per-frame duration (playback
-  arrives in Phase 2)
+- Frames: add, duplicate, delete, reorder, per-frame duration
+- Animation: timeline playback (loop, once, ping-pong, per-frame durations),
+  onion skinning (previous/next count, opacity, red/blue tint), animation
+  tags over frame ranges with direction and loop, and a live preview panel
+  that keeps looping while you draw
 - Undo/redo of every edit, with labels
 - Native `.dotify` project format (versioned ZIP, lossless, checksummed),
   atomic saves, autosave with crash recovery
 - PNG export at 1×–16× with nearest-neighbour scaling
+- Spritesheet export (grid or one row per tag, padding, edge extrusion) with
+  JSON metadata, and animated GIF export with exact colors
+- Godot 4 export: spritesheet PNG + `SpriteFrames` `.tres` with one
+  animation per tag, ready for `AnimatedSprite2D`
 - `dotify` CLI for headless editing and export
 
 ## Install
@@ -90,8 +97,42 @@ echo '[{"type":"draw_rectangle","layer":1,"frame":2,"x":4,"y":4,"width":8,"heigh
 cargo run -p dotify-cli -- export-png hero.dotify hero.png --scale 8
 ```
 
+```bash
+cargo run -p dotify-cli -- export-godot hero.dotify ~/game/sprites/hero --scale 1 --padding 1
+```
+
+```bash
+cargo run -p dotify-cli -- export-gif hero.dotify walk.gif --tag Walk --scale 4
+```
+
+```bash
+cargo run -p dotify-cli -- export-sheet hero.dotify hero.png --layout rows --extrude 1
+```
+
 `apply` takes the same JSON commands as the desktop app (see
-`crates/dotify-core/src/command.rs`); an array is applied atomically.
+`crates/dotify-core/src/command.rs`); an array is applied atomically. Tags
+are edited the same way, for example
+`{"type":"create_tag","name":"Walk","from":2,"to":5,"direction":"ping_pong"}`.
+
+### Godot 4
+
+File ▸ Export for Godot… (⇧⌘E) or `dotify export-godot` writes three files
+into a folder of your Godot project:
+
+- `<name>.png` – the spritesheet
+- `<name>.tres` – a `SpriteFrames` resource with one animation per tag (or a
+  `default` animation when there are no tags). Each animation's `speed` is
+  `1000 / gcd(frame durations)` FPS and every frame gets a whole-number
+  `duration`, so timing matches Dotify exactly. Loop comes from the tag;
+  reverse and ping-pong tags are unrolled into plain frame lists.
+- `<name>.json` – engine-neutral metadata (frame rects, durations, tags,
+  pivot)
+
+Assign the `.tres` to an `AnimatedSprite2D`'s *Sprite Frames* and pick an
+animation. The `.tres` references the PNG relative to itself, so keep them
+together, or pass `--res-dir res://…` to write an absolute project path.
+Set *Texture ▸ Filter* to *Nearest* (or the project default) for crisp
+pixels.
 
 ## Keyboard shortcuts
 
@@ -103,16 +144,18 @@ cargo run -p dotify-cli -- export-png hero.dotify hero.png --scale 8
 | I | Eyedropper | H | Hand |
 | X | Swap colors | [ / ] | Brush size |
 | , / . | Previous / next frame | ⇧N | New layer |
+| Enter | Play / pause | ⇧-click frame | Select frame range |
 | Space | Pan while held | Alt | Eyedropper while held |
 | ⌘Z / ⇧⌘Z | Undo / redo | ⌘= / ⌘− | Zoom |
 | ⌘0 | Fit | ⌘1 | Actual size |
-| ⌘' | Pixel grid | ⌘E | Export PNG |
+| ⌘' | Pixel grid | ⌘E | Export |
+| ⇧⌘E | Export for Godot | | |
 
 ## Project layout
 
 ```
 crates/dotify-core     document model, commands, undo/redo, compositing, .dotify format
-crates/dotify-export   PNG export (GIF, spritesheets and metadata next)
+crates/dotify-export   PNG, spritesheet + JSON, GIF and Godot 4 export
 crates/dotify-cli      headless `dotify` binary
 apps/desktop           Tauri + React app (src/ = UI, src-tauri/ = native shell)
 docs/                  ARCHITECTURE.md, FORMAT.md

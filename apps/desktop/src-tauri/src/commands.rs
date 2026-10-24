@@ -5,6 +5,9 @@ use std::path::PathBuf;
 
 use dotify_core::format::{self, WriteOptions};
 use dotify_core::{Command, Document, FrameId, LayerId, Outcome, Rect};
+use dotify_export::gif::{GifOptions, GifReport};
+use dotify_export::godot::{GodotFiles, GodotOptions};
+use dotify_export::sheet::SheetOptions;
 use dotify_export::PngExportOptions;
 use serde::Serialize;
 use tauri::ipc::Response;
@@ -192,6 +195,83 @@ pub fn read_cel(state: State<'_, AppState>, layer: u32, frame: u32, rect: Option
         None => vec![0; rect.width as usize * rect.height as usize * 4],
     };
     Ok(Response::new(bytes))
+}
+
+/// Raw RGBA bytes of a frame with all visible layers composited by the
+/// engine (used for playback, onion skins and the preview).
+#[tauri::command]
+pub fn read_frame(state: State<'_, AppState>, frame: u32) -> CmdResult<Response> {
+    let s = state.lock();
+    let img = dotify_core::composite::composite_frame(s.editor.document(), FrameId(frame))?;
+    Ok(Response::new(img.into_raw()))
+}
+
+/// The current document and a file stem for suggested export names.
+fn export_source(state: &AppState) -> (Document, String) {
+    let s = state.lock();
+    let stem = s.file_name().trim_end_matches(".dotify").to_string();
+    (s.editor.document().clone(), stem)
+}
+
+fn pick_export_path(app: &AppHandle, title: &str, file_name: String, filter: &str, ext: &str) -> Option<PathBuf> {
+    let picked =
+        app.dialog().file().set_title(title).set_file_name(file_name).add_filter(filter, &[ext]).blocking_save_file();
+    let mut path = picked.and_then(|p| p.into_path().ok())?;
+    if path.extension().is_none_or(|e| !e.eq_ignore_ascii_case(ext)) {
+        path.set_extension(ext);
+    }
+    Some(path)
+}
+
+/// Spritesheet PNG plus `<name>.json` metadata next to it.
+#[tauri::command]
+pub async fn export_sheet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    options: SheetOptions,
+) -> CmdResult<Option<String>> {
+    let (doc, stem) = export_source(&state);
+    let Some(path) = pick_export_path(&app, "Export Spritesheet", format!("{stem}.png"), "PNG Image", "png") else {
+        return Ok(None);
+    };
+    dotify_export::export_spritesheet(&doc, &options, None, &path)?;
+    Ok(Some(path.display().to_string()))
+}
+
+#[derive(Serialize)]
+pub struct GifExport {
+    path: String,
+    report: GifReport,
+}
+
+#[tauri::command]
+pub async fn export_gif(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    options: GifOptions,
+) -> CmdResult<Option<GifExport>> {
+    let (doc, stem) = export_source(&state);
+    let name =
+        options.tag.as_deref().map_or(stem.clone(), |t| format!("{stem}-{}", dotify_export::godot::file_stem(t)));
+    let Some(path) = pick_export_path(&app, "Export GIF", format!("{name}.gif"), "GIF Image", "gif") else {
+        return Ok(None);
+    };
+    let report = dotify_export::gif::export_gif(&doc, &options, &path)?;
+    Ok(Some(GifExport { path: path.display().to_string(), report }))
+}
+
+/// Godot 4 SpriteFrames export into a folder the user picks.
+#[tauri::command]
+pub async fn export_godot(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    options: GodotOptions,
+) -> CmdResult<Option<GodotFiles>> {
+    let (doc, stem) = export_source(&state);
+    let picked = app.dialog().file().set_title("Export to Godot Folder").blocking_pick_folder();
+    let Some(dir) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let options = GodotOptions { name: options.name.or(Some(stem)), ..options };
+    Ok(Some(dotify_export::godot::export_godot(&doc, &options, &dir)?))
 }
 
 #[tauri::command]
