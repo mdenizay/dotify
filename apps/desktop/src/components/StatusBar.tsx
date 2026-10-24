@@ -15,7 +15,9 @@ export function StatusBar() {
       <span>
         {width}×{height}
       </span>
-      <span className="w-20">{inside ? `${cursor.x}, ${cursor.y}` : "–"}</span>
+      <span className="w-28" title="Column and row under the cursor (1-based)">
+        {inside ? `X ${cursor.x + 1}  Y ${cursor.y + 1}` : "–"}
+      </span>
       <span className="flex w-28 items-center gap-1.5">
         {inside && cursor.color && (
           <>

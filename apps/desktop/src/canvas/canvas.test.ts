@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { blendOver, hsvaToRgba, parseHex, rgbaToHsva, toHex } from "./color";
 import { boxFrom, brushOffsets, ellipse, line, rectangle } from "./raster";
+import { labelledCells, rulerStep } from "./rulers";
 import { fit, nextZoom, scaleOf, toCanvas, zoomAt } from "./viewport";
 
 const collect = (f: (plot: (x: number, y: number) => void) => void) => {
@@ -114,5 +115,20 @@ describe("viewport", () => {
     expect(nextZoom(4, 1)).toBe(6);
     expect(nextZoom(4, -1)).toBe(3);
     expect(nextZoom(1, -1)).toBe(1);
+  });
+});
+
+describe("rulers", () => {
+  it("picks a label step that keeps labels apart", () => {
+    expect(rulerStep(64, 34)).toBe(1);
+    expect(rulerStep(16, 34)).toBe(4);
+    expect(rulerStep(2, 34)).toBe(20);
+    expect(rulerStep(0.01, 34)).toBe(1000);
+  });
+
+  it("labels the first cell, every step and the last cell", () => {
+    expect(labelledCells(48, 8)).toEqual([1, 8, 16, 24, 32, 40, 48]);
+    expect(labelledCells(10, 4)).toEqual([1, 4, 8, 10]);
+    expect(labelledCells(1, 1)).toEqual([1]);
   });
 });

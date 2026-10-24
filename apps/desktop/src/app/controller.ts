@@ -367,6 +367,8 @@ class Controller {
         return this.view?.actualSize();
       case "zoom_fit":
         return this.view?.fitToWindow();
+      case "toggle_rulers":
+        return setEditor((s) => ({ showRulers: !s.showRulers }));
       case "toggle_grid":
         return setEditor((s) => ({ showGrid: !s.showGrid }));
       case "toggle_theme":

@@ -61,6 +61,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item(app, "zoom_fit", "Fit to Window", Some("CmdOrCtrl+0"))?)
         .separator()
         .item(&item(app, "toggle_grid", "Show Pixel Grid", Some("CmdOrCtrl+'"))?)
+        .item(&item(app, "toggle_rulers", "Show Rulers", Some("CmdOrCtrl+Shift+R"))?)
         .item(&item(app, "toggle_theme", "Toggle Light/Dark", None)?)
         .separator()
         .item(&PredefinedMenuItem::fullscreen(app, None)?)
