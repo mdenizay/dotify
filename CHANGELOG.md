@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Fix the canvas background and checkerboard keeping the old colors after switching between light and dark themes
+- The window title bar and system dialogs now follow the app theme
+
 ## 0.1.0
 
 First release: a working pixel editor.

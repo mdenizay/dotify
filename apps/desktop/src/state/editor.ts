@@ -1,3 +1,4 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type {
   Frame,
@@ -88,6 +89,25 @@ export const useEditor = create<EditorState>()(() => ({
 
 export const setEditor = useEditor.setState;
 export const getEditor = useEditor.getState;
+
+/** Native window colors; keep in sync with `--bg` in index.css. */
+const WINDOW_BACKGROUND: Record<Theme, string> = { dark: "#17181b", light: "#e9e7e3" };
+
+/**
+ * Apply the theme synchronously, before any other store subscriber (such as
+ * the canvas) reads CSS variables, and match the native window chrome.
+ */
+function applyTheme(theme: Theme) {
+  document.documentElement.dataset.theme = theme;
+  const win = getCurrentWindow();
+  void win.setTheme(theme).catch(() => undefined);
+  void win.setBackgroundColor(WINDOW_BACKGROUND[theme]).catch(() => undefined);
+}
+
+applyTheme(useEditor.getState().theme);
+useEditor.subscribe((s, prev) => {
+  if (s.theme !== prev.theme) applyTheme(s.theme);
+});
 
 // Persist preferences (not document state) across launches.
 useEditor.subscribe((s, prev) => {

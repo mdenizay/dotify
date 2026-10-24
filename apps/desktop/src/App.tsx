@@ -83,13 +83,8 @@ function RightPanel() {
 }
 
 export function App() {
-  const theme = useEditor((s) => s.theme);
   const ready = useEditor((s) => s.session !== null);
   const [fatal, setFatal] = useState<string | null>(null);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
 
   useEffect(() => {
     controller.init().catch((e) => setFatal(errorMessage(e)));

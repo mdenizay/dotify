@@ -13,6 +13,8 @@
     "dialog:allow-ask",
     "dialog:allow-message",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-set-theme",
+    "core:window:allow-set-background-color"
   ]
 }
