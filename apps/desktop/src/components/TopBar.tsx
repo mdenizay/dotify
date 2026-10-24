@@ -2,11 +2,13 @@ import {
   Download,
   FlipHorizontal2,
   FlipVertical2,
+  Ghost,
   Grid3x3,
   Minus,
   Moon,
   Plus,
   Redo2,
+  Ruler,
   Sun,
   Undo2,
 } from "lucide-react";
@@ -25,6 +27,8 @@ export function TopBar() {
   const showGrid = useEditor((s) => s.showGrid);
   const symX = useEditor((s) => s.symmetryX);
   const symY = useEditor((s) => s.symmetryY);
+  const symMode = useEditor((s) => s.symmetryMode);
+  const showRulers = useEditor((s) => s.showRulers);
   const theme = useEditor((s) => s.theme);
 
   return (
@@ -56,6 +60,22 @@ export function TopBar() {
         onClick={() => setEditor({ symmetryY: !symY })}
       >
         <FlipVertical2 size={15} strokeWidth={1.75} />
+      </IconButton>
+      <IconButton
+        label="Mirror guide only — show the mirrored position without painting it"
+        active={symMode === "guide"}
+        disabled={!symX && !symY}
+        onClick={() => setEditor({ symmetryMode: symMode === "guide" ? "paint" : "guide" })}
+      >
+        <Ghost size={15} strokeWidth={1.75} />
+      </IconButton>
+      <IconButton
+        label="Rulers"
+        shortcut="⇧⌘R"
+        active={showRulers}
+        onClick={() => setEditor({ showRulers: !showRulers })}
+      >
+        <Ruler size={15} strokeWidth={1.75} />
       </IconButton>
       <IconButton
         label="Pixel grid"

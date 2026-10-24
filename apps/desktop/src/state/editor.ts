@@ -15,9 +15,13 @@ export type ToolId =
 
 export type Theme = "dark" | "light";
 
+/** "paint" mirrors strokes across the axes; "guide" only shows where the mirror would land. */
+export type SymmetryMode = "paint" | "guide";
+
 interface Prefs {
   theme: Theme;
   showGrid: boolean;
+  showRulers: boolean;
   primary: Hex;
   secondary: Hex;
   brushSize: number;
@@ -35,6 +39,7 @@ export interface EditorState extends Prefs {
   tool: ToolId;
   symmetryX: boolean;
   symmetryY: boolean;
+  symmetryMode: SymmetryMode;
   /** Mirrors the canvas view; written by CanvasView only. */
   zoom: number;
   cursor: { x: number; y: number; color: Hex | null } | null;
@@ -51,6 +56,7 @@ const PREFS_KEY = "dotify.prefs.v1";
 const defaults: Prefs = {
   theme: "dark",
   showGrid: false,
+  showRulers: true,
   primary: "#1d2b53ff",
   secondary: "#00000000",
   brushSize: 1,
@@ -78,6 +84,7 @@ export const useEditor = create<EditorState>()(() => ({
   tool: "pencil",
   symmetryX: false,
   symmetryY: false,
+  symmetryMode: "paint",
   zoom: 1,
   cursor: null,
   opacityPreview: null,

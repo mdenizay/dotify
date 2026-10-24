@@ -1,8 +1,9 @@
 import type { Command, Hex } from "../engine/types";
 import { activeLayer, getEditor, setEditor, toast, useEditor, type ToolId } from "../state/editor";
 import type { CelCache } from "./CelCache";
-import { toHex } from "./color";
+import { rgba, toHex } from "./color";
 import { brushOffsets } from "./raster";
+import { drawRulers, RULER_SIZE } from "./rulers";
 import { createTools, type Tool, type ToolHost, type ToolInput } from "./tools";
 import { center, fit, nextZoom, scaleOf, toCanvas, zoomAt, type Viewport } from "./viewport";
 
@@ -37,6 +38,13 @@ export class CanvasView implements ToolHost {
     checkA: "#2a2b30",
     checkB: "#232428",
     grid: "#ffffff1f",
+    panel: "#1d1e22",
+    hover: "#2c2d33",
+    border: "#2e2f35",
+    faint: "#6b6c74",
+    dim: "#9d9ea6",
+    accent: "#ff5a5f",
+    accentText: "#ffffff",
   };
   private disposers: Array<() => void> = [];
   private resizeObserver: ResizeObserver;
@@ -88,6 +96,11 @@ export class CanvasView implements ToolHost {
         if (
           s.session !== p.session ||
           s.showGrid !== p.showGrid ||
+          s.showRulers !== p.showRulers ||
+          s.symmetryX !== p.symmetryX ||
+          s.symmetryY !== p.symmetryY ||
+          s.symmetryMode !== p.symmetryMode ||
+          s.primary !== p.primary ||
           s.activeLayerId !== p.activeLayerId ||
           s.opacityPreview !== p.opacityPreview ||
           s.tool !== p.tool ||
@@ -151,8 +164,10 @@ export class CanvasView implements ToolHost {
   fillContiguous() {
     return getEditor().fillContiguous;
   }
+  /** Axes that strokes are mirrored across. In guide mode nothing is mirrored. */
   symmetry() {
     const s = getEditor();
+    if (s.symmetryMode === "guide") return { x: false, y: false };
     return { x: s.symmetryX, y: s.symmetryY };
   }
 
@@ -213,6 +228,13 @@ export class CanvasView implements ToolHost {
       checkA: v("--check-a", this.colors.checkA),
       checkB: v("--check-b", this.colors.checkB),
       grid: v("--grid", this.colors.grid),
+      panel: v("--panel", this.colors.panel),
+      hover: v("--hover", this.colors.hover),
+      border: v("--border", this.colors.border),
+      faint: v("--text-faint", this.colors.faint),
+      dim: v("--text-dim", this.colors.dim),
+      accent: v("--accent", this.colors.accent),
+      accentText: v("--accent-text", this.colors.accentText),
     };
     this.checker = null;
   }
@@ -285,7 +307,52 @@ export class CanvasView implements ToolHost {
     ctx.lineWidth = 1;
     ctx.strokeRect(vp.ox - 0.5, vp.oy - 0.5, w + 1, h + 1);
 
+    this.drawMirrorAxes(summary.width, summary.height, scale);
     this.drawHover(scale);
+    if (s.showRulers) {
+      drawRulers(ctx, vp, canvas.width, canvas.height, summary.width, summary.height, this.hover, {
+        background: this.colors.panel,
+        canvasRange: this.colors.hover,
+        border: this.colors.border,
+        tick: this.colors.faint,
+        text: this.colors.dim,
+        accent: this.colors.accent,
+        accentText: this.colors.accentText,
+      });
+    }
+  }
+
+  /** Dashed lines through the canvas centre for each active symmetry axis. */
+  private drawMirrorAxes(cols: number, rows: number, scale: number) {
+    const s = getEditor();
+    if (!s.symmetryX && !s.symmetryY) return;
+    const { ctx, vp } = this;
+    const dpr = vp.dpr;
+    ctx.save();
+    ctx.strokeStyle = this.colors.accent;
+    ctx.globalAlpha = s.symmetryMode === "guide" ? 0.45 : 0.8;
+    ctx.lineWidth = Math.max(1, Math.round(dpr));
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
+    ctx.beginPath();
+    if (s.symmetryX) {
+      const x = vp.ox + Math.round((cols * scale) / 2) + 0.5;
+      ctx.moveTo(x, vp.oy);
+      ctx.lineTo(x, vp.oy + rows * scale);
+    }
+    if (s.symmetryY) {
+      const y = vp.oy + Math.round((rows * scale) / 2) + 0.5;
+      ctx.moveTo(vp.ox, y);
+      ctx.lineTo(vp.ox + cols * scale, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Is (cssX, cssY) over a ruler strip rather than the drawing area? */
+  private overRuler(e: PointerEvent): boolean {
+    if (!getEditor().showRulers) return false;
+    const r = this.canvas.getBoundingClientRect();
+    return e.clientX - r.left < RULER_SIZE || e.clientY - r.top < RULER_SIZE;
   }
 
   private drawGrid(cols: number, rows: number, scale: number) {
@@ -312,11 +379,48 @@ export class CanvasView implements ToolHost {
     const y = this.vp.oy + (this.hover.y + off[1]) * scale;
     const side = size * scale;
     const { ctx } = this;
+    this.drawMirrorGhosts(this.hover.x + off[0], this.hover.y + off[1], size, scale);
     ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(0,0,0,0.75)";
     ctx.strokeRect(x - 0.5, y - 0.5, side + 1, side + 1);
     ctx.strokeStyle = "rgba(255,255,255,0.9)";
     ctx.strokeRect(x + 0.5, y + 0.5, side - 1, side - 1);
+  }
+
+  /**
+   * Where the brush footprint at cell (cx, cy) lands under each active
+   * mirror: a see-through swatch of the current color with a dashed outline.
+   * In guide mode this is the only effect; nothing is painted there.
+   */
+  private drawMirrorGhosts(cx: number, cy: number, size: number, scale: number) {
+    const s = getEditor();
+    if (!s.symmetryX && !s.symmetryY) return;
+    const w = this.cache.width,
+      h = this.cache.height;
+    const mx = w - cx - size,
+      my = h - cy - size;
+    const spots: Array<[number, number]> = [];
+    if (s.symmetryX) spots.push([mx, cy]);
+    if (s.symmetryY) spots.push([cx, my]);
+    if (s.symmetryX && s.symmetryY) spots.push([mx, my]);
+    const { ctx, vp } = this;
+    const side = size * scale;
+    const [r, g, b, a] = rgba(s.primary);
+    ctx.save();
+    for (const [gx, gy] of spots) {
+      if (gx === cx && gy === cy) continue;
+      const x = vp.ox + gx * scale,
+        y = vp.oy + gy * scale;
+      if (a > 0 && s.tool !== "eraser") {
+        ctx.fillStyle = `rgba(${r},${g},${b},0.45)`;
+        ctx.fillRect(x, y, side, side);
+      }
+      ctx.lineWidth = Math.max(1, Math.round(vp.dpr));
+      ctx.setLineDash([3 * vp.dpr, 2 * vp.dpr]);
+      ctx.strokeStyle = this.colors.accent;
+      ctx.strokeRect(x + 0.5, y + 0.5, side - 1, side - 1);
+    }
+    ctx.restore();
   }
 
   // ── Input ────────────────────────────────────────────────────────────
@@ -366,6 +470,7 @@ export class CanvasView implements ToolHost {
       return;
     }
     if (e.button !== 0 && e.button !== 2) return;
+    if (this.overRuler(e)) return;
     const impl = this.tools[tool];
     if (!impl) return;
     this.slot = e.button === 2 ? "secondary" : "primary";
