@@ -29,7 +29,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "GraphicsAndDesign",
     "shortDescription": "Pixel art and sprite animation studio",
     "icon": [
@@ -41,11 +44,24 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["dotify"],
+        "ext": [
+          "dotify"
+        ],
         "name": "Dotify Project",
         "role": "Editor",
         "mimeType": "application/x-dotify"
       }
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBEOUE1QTg0NEFDNkMyRTUKUldUbHdzWktoRnFhRGRmdVJkZXdSVjlkZ3hVTSs0UlpSMDFTSDlNL3htY1I1dHhza1JxT2t4VWsK",
+      "endpoints": [
+        "https://github.com/mdenizay/dotify/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

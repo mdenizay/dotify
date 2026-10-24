@@ -20,6 +20,7 @@ fn item<R: Runtime>(
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let app_menu = SubmenuBuilder::new(app, "Dotify")
         .item(&PredefinedMenuItem::about(app, Some("About Dotify"), None)?)
+        .item(&item(app, "check_updates", "Check for Updates…", None)?)
         .separator()
         .item(&PredefinedMenuItem::services(app, None)?)
         .separator()

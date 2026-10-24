@@ -242,6 +242,10 @@ class Controller {
         return setEditor((s) => ({ showGrid: !s.showGrid }));
       case "toggle_theme":
         return setEditor((s) => ({ theme: s.theme === "dark" ? "light" : "dark" }));
+      case "check_updates": {
+        const { checkForUpdates } = await import("./updates");
+        return checkForUpdates({ interactive: true });
+      }
       case "close":
       case "quit":
         return getCurrentWindow().close();

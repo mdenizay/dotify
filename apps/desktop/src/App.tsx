@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { controller } from "./app/controller";
 import { installShortcuts } from "./app/shortcuts";
+import { scheduleUpdateChecks } from "./app/updates";
 import { CanvasView } from "./canvas/CanvasView";
 import { ColorPicker } from "./components/ColorPicker";
 import { ExportDialog, NewDocumentDialog, RecoveryDialog } from "./components/Dialogs";
@@ -92,7 +93,12 @@ export function App() {
 
   useEffect(() => {
     controller.init().catch((e) => setFatal(errorMessage(e)));
-    return installShortcuts();
+    const stopUpdates = scheduleUpdateChecks();
+    const removeShortcuts = installShortcuts();
+    return () => {
+      stopUpdates();
+      removeShortcuts();
+    };
   }, []);
 
   if (fatal) {

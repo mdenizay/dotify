@@ -10,6 +10,8 @@ use session::{AppState, AUTOSAVE_INTERVAL};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .menu(menu::build)
         .on_menu_event(|app, event| {
             // The UI owns menu behaviour (it may need to confirm first).

@@ -28,7 +28,27 @@ through the same command engine you use by hand.
 - PNG export at 1×–16× with nearest-neighbour scaling
 - `dotify` CLI for headless editing and export
 
-## Getting started
+## Install
+
+With [Homebrew](https://brew.sh) (macOS 13+, Apple Silicon):
+
+```bash
+brew install --cask mdenizay/tap/dotify
+```
+
+The command-line tool is a separate formula:
+
+```bash
+brew install mdenizay/tap/dotify-cli
+```
+
+Builds are signed with a Developer ID and notarized by Apple. Dotify checks
+for updates on launch and every few hours, and from **Dotify → Check for
+Updates…**. Updates are signed and verified before they install, and Dotify
+offers to save your work before restarting. Homebrew leaves updating to the
+app (`auto_updates true`), so `brew upgrade` won't fight it.
+
+## Building from source
 
 Requirements: Rust (stable, ≥ 1.85), Node.js ≥ 20, pnpm 10, and Xcode
 command line tools on macOS.
@@ -46,6 +66,7 @@ pnpm dev
 | Command            | What it does                                        |
 |--------------------|-----------------------------------------------------|
 | `pnpm build`       | Release build and macOS bundle (`target/release/bundle`) |
+| `tools/release.sh` | Sign, notarize, publish a GitHub release and update the Homebrew tap (maintainers) |
 | `pnpm test`        | Rust workspace tests + frontend unit tests          |
 | `pnpm lint`        | `cargo clippy -D warnings` + ESLint                 |
 | `pnpm format`      | `cargo fmt` + Prettier                              |
