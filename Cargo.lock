@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "clap",
  "dotify-core",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "png",
  "serde",
@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dotify-core",
  "dotify-export",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-export"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dotify-core",
  "tempfile",

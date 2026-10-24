@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Rulers along the top and left edges with cell numbers, the canvas size highlighted and the column/row under the cursor marked (View → Show Rulers, ⇧⌘R)
+- The status bar shows the cell under the cursor as X/Y, counting from 1
+- Symmetry shows its mirror axes and a see-through preview of the brush at the mirrored cell
+- New mirror guide mode: see where the mirror would land without painting there
+
 ## 0.1.1
 
 - Fix the canvas background and checkerboard keeping the old colors after switching between light and dark themes
