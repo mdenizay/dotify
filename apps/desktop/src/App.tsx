@@ -6,6 +6,7 @@ import { CanvasView } from "./canvas/CanvasView";
 import { OverviewView } from "./canvas/OverviewView";
 import { ColorPicker } from "./components/ColorPicker";
 import {
+  ExportAllDialog,
   ExportDialog,
   NewArtboardDialog,
   NewDocumentDialog,
@@ -14,7 +15,9 @@ import {
 import { LayerActions, LayersPanel } from "./components/LayersPanel";
 import { LibraryPanel } from "./components/LibraryPanel";
 import { PaletteActions, PalettePanel } from "./components/PalettePanel";
+import { PreviewActions, PreviewPanel } from "./components/PreviewPanel";
 import { StatusBar } from "./components/StatusBar";
+import { TagDialog } from "./components/TagDialog";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import { TopBar } from "./components/TopBar";
@@ -25,7 +28,13 @@ import { setEditor, useEditor } from "./state/editor";
 function CanvasHost() {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const view = new CanvasView(ref.current!, { cache: controller.cache, run: controller.run });
+    const view = new CanvasView(ref.current!, {
+      cache: controller.cache,
+      frames: controller.frames,
+      player: controller.player,
+      run: controller.run,
+      stopPlayback: controller.stopPlayback,
+    });
     controller.view = view;
     return () => {
       controller.view = null;
@@ -56,6 +65,8 @@ function RightPanel() {
   const width = useEditor((s) => s.rightPanelWidth);
   const [open, setOpen] = useState({ color: true, palette: true, layers: true });
   const toggle = (k: keyof typeof open) => () => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  // Persisted, because closing the preview also stops its playback.
+  const previewOpen = useEditor((s) => s.previewOpen);
 
   const startResize = (e: React.PointerEvent) => {
     const startX = e.clientX;
@@ -82,6 +93,14 @@ function RightPanel() {
         onPointerDown={startResize}
         className="absolute top-0 bottom-0 -left-1 z-10 w-2 cursor-col-resize"
       />
+      <Section
+        title="Preview"
+        open={previewOpen}
+        onToggle={() => setEditor({ previewOpen: !previewOpen })}
+        actions={<PreviewActions />}
+      >
+        <PreviewPanel />
+      </Section>
       <Section title="Color" open={open.color} onToggle={toggle("color")}>
         <ColorPicker />
       </Section>
@@ -153,6 +172,8 @@ export function App() {
           <NewDocumentDialog />
           <NewArtboardDialog />
           <ExportDialog />
+          <ExportAllDialog />
+          <TagDialog />
           <RecoveryDialog />
         </>
       )}

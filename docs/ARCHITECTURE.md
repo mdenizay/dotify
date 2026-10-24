@@ -31,7 +31,8 @@ dotify/
 ├── crates/
 │   ├── dotify-core/            Document and project model, commands, history,
 │   │                           compositing, PNG codec, .dotify format
-│   ├── dotify-export/          PNG export, batch export of all artboards
+│   ├── dotify-export/          PNG, spritesheet + JSON metadata, GIF, Godot 4,
+│   │                           batch export of all artboards
 │   └── dotify-cli/             Headless project manipulation and export
 ├── apps/desktop/               Tauri + React application
 │   ├── src/                    React/TypeScript UI
@@ -120,6 +121,7 @@ public editing vocabulary shared by every client:
   `move_layer`
 - Frames: `add_frame`, `duplicate_frame`, `delete_frame`, `move_frame`,
   `set_frame_duration`
+- Tags: `create_tag`, `update_tag`, `delete_tag` (addressed by unique name)
 - Palette / document: `set_palette`, `rename_document`
 - `batch`: a list of commands applied atomically
 
@@ -140,7 +142,7 @@ against the current document into one or more `Op`s:
 | `SetLayer`         | `SetLayer` with old props     |
 | `MoveLayer`        | `MoveLayer` back              |
 | `InsertFrame` / `RemoveFrame` / `MoveFrame` / `SetFrame` | symmetric |
-| `SetPalette`, `SetName` | old value                |
+| `SetPalette`, `SetName`, `SetTags` | old value     |
 
 Applying an `Op` returns its inverse. A transaction records the inverses of
 everything it applied; undo applies them in reverse order and collects *their*
@@ -175,6 +177,29 @@ recursion). The TypeScript previews in `apps/desktop/src/canvas/raster.ts`
 mirror these algorithms so previews match committed results; the engine is
 always authoritative.
 
+## dotify-export
+
+All exporters composite with `composite.rs` and scale with integer
+nearest-neighbour; nothing is resampled or quantized.
+
+- `sheet.rs` – packs frames into a spritesheet: `grid` (each frame once,
+  near-square or fixed columns) or `rows_per_tag` (one row per tag, then
+  untagged frames). `padding` separates cells, `extrude` repeats each cell's
+  edge pixels outwards. Also defines `playback_order`, the one definition of
+  forward/reverse/ping-pong order (mirrored in the desktop `playback.ts`).
+- `meta.rs` – engine-neutral JSON: frame rects, durations, tags with their
+  playback sequence, pivot.
+- `gif.rs` – animated GIF with exact colors (a global palette when ≤ 255
+  colors overall, else per-frame palettes; more than 255 in one frame is an
+  error). Partial alpha is rounded at 128 and reported.
+- `godot.rs` – Godot 4 `SpriteFrames` `.tres` (one `AtlasTexture` per used
+  cell, one animation per tag, `speed = 1000 / gcd(durations)`), written
+  together with the sheet PNG and JSON.
+- `project.rs` – export every artboard of a project in one go: `plan` lays
+  artboards out as `<folder>/<name>` with safe, de-duplicated names and each
+  goes through an `ArtboardExporter` (`PngArtboardExporter`,
+  `GodotArtboardExporter`; new formats implement the trait).
+
 ## The `.dotify` format
 
 See [`FORMAT.md`](FORMAT.md) for the full specification. In short: a ZIP
@@ -193,10 +218,12 @@ renamed into place.
   current file path and the active artboard.
 - IPC commands: `doc_new`, `doc_open`, `doc_save`, `doc_save_as`,
   `doc_view`, `execute` (a `ProjectCommand`), `undo`, `redo`,
-  `artboard_activate`, `read_cel`, `artboard_composite`, `export_png`,
-  `export_all_png`, and recovery commands. `read_cel` and
-  `artboard_composite` return raw RGBA bytes through `tauri::ipc::Response`
-  (no JSON/base64 overhead).
+  `artboard_activate`, `read_cel`, `read_frame` (an engine-composited frame
+  of the active artboard), `artboard_composite`, `export_png`,
+  `export_all`, `export_sheet`, `export_gif`, `export_godot`, and
+  recovery commands. Single-artboard exports use the active artboard.
+  `read_cel`, `read_frame` and `artboard_composite` return raw RGBA bytes
+  through `tauri::ipc::Response` (no JSON/base64 overhead).
 - File dialogs are opened **from Rust**, so the webview never supplies
   arbitrary filesystem paths to the backend. The webview has no filesystem
   permissions.
@@ -218,6 +245,17 @@ renamed into place.
   frame has an offscreen canvas that is updated with `putImageData` only for
   dirty regions; the screen pass is a handful of nearest-neighbour
   `drawImage` calls plus checkerboard and grid.
+- `canvas/FrameStore.ts` – engine composites of whole frames (`read_frame`)
+  for playback, onion skins and the preview. Loaded lazily, refetched after
+  edits that touch them, old pixels shown until the new ones arrive.
+- `canvas/playback.ts` – `Player`, a `requestAnimationFrame` clock that
+  walks a frame range by per-frame durations (loop/once, forward/reverse/
+  ping-pong). The timeline player drives the canvas, which shows composites
+  while playing; any edit pauses it on the shown frame. A second player
+  loops in the preview panel (`canvas/PreviewView.ts`) while you draw.
+- `canvas/onion.ts` – which neighbouring frames to draw under the active
+  one, and how faded. `CanvasView` draws them (optionally tinted) below the
+  layers.
 - `canvas/tools.ts` – tool behaviours. Pencil/eraser paint into the local
   cache for zero-latency feedback, then commit one `set_pixels` command per
   stroke; shape tools draw into a preview layer and commit a shape command;
@@ -242,9 +280,12 @@ renamed into place.
   every command, undo/redo round trips, batch atomicity, revision checking and
   format round trips/corruption detection.
 - `dotify-core` projects: every library command with undo/redo, palette
-  sharing, cross-artboard batches; v1 → v2 migration against JSON and real
+  sharing, cross-artboard batches; v1 → v2 → v3 migrations against JSON and real
   `.dotify` fixtures.
-- `dotify-export`: PNG export pixel equality and scaling, batch export layout.
+- `dotify-export`: PNG export pixel equality and scaling; batch export layout; spritesheet
+  layouts, padding and extrusion; GIF round trips (colors, delays, loop,
+  per-frame palettes); a snapshot of the Godot `.tres`
+  (`tests/snapshots/hero.tres`, refresh with `DOTIFY_UPDATE_SNAPSHOTS=1`).
 - `dotify-cli`: end-to-end run against a temp directory.
 - Frontend: Vitest tests for rasterisers, view math, overview layout and
   library drag-and-drop targets.
@@ -253,8 +294,8 @@ renamed into place.
 
 | Phase | Scope |
 |-------|-------|
-| 1 (current) | Tauri app, workspace, canvas, pencil/eraser/fill/line/rect/ellipse/eyedropper, zoom/pan, palette, layers, undo/redo, save/load, PNG export, autosave/recovery |
-| 2 | Timeline playback, onion skinning, tags, live preview, GIF/spritesheet + JSON export |
+| 1 | Tauri app, workspace, canvas, pencil/eraser/fill/line/rect/ellipse/eyedropper, zoom/pan, palette, layers, undo/redo, save/load, PNG export, autosave/recovery |
+| 2 (current) | Timeline playback, onion skinning, tags, live preview, GIF/spritesheet + JSON export, Godot 4 export |
 | 3 | `dotify-mcp` stdio server over the shared command engine; permissions, revision checks, confirmations |
 | 4 | Built-in AI assistant, provider abstraction (pixel-command vs raster generation), keychain-stored keys, preview/approve/undo |
 | 5 | Selections and transforms, tilemaps, engine export presets, Windows/Linux |

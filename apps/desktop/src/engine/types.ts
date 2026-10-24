@@ -43,11 +43,14 @@ export interface Palette {
   colors: Hex[];
 }
 
+export type Direction = "forward" | "reverse" | "ping_pong";
+
 export interface AnimationTag {
   name: string;
   from: FrameId;
   to: FrameId;
-  direction: "forward" | "reverse" | "ping_pong";
+  direction: Direction;
+  loop: boolean;
   color: Hex;
 }
 
@@ -142,6 +145,26 @@ export type Command =
   | { type: "delete_frame"; frame: FrameId }
   | { type: "move_frame"; frame: FrameId; index: number }
   | { type: "set_frame_duration"; frame: FrameId; duration_ms: number }
+  | {
+      type: "create_tag";
+      name: string;
+      from: FrameId;
+      to: FrameId;
+      direction?: Direction | null;
+      loop?: boolean | null;
+      color?: Hex | null;
+    }
+  | {
+      type: "update_tag";
+      tag: string;
+      name?: string | null;
+      from?: FrameId | null;
+      to?: FrameId | null;
+      direction?: Direction | null;
+      loop?: boolean | null;
+      color?: Hex | null;
+    }
+  | { type: "delete_tag"; tag: string }
   | { type: "set_palette"; palette: Palette }
   | { type: "rename_document"; name: string }
   | { type: "batch"; label?: string | null; commands: Command[] };
@@ -191,6 +214,42 @@ export interface Outcome {
 export interface ExportAllResult {
   dir: string;
   files: number;
+}
+
+// Exporters (crates/dotify-export).
+
+export type SheetLayout = "grid" | "rows_per_tag";
+
+export interface SheetOptions {
+  layout: SheetLayout;
+  /** null = near-square grid */
+  columns: number | null;
+  scale: number;
+  padding: number;
+  extrude: number;
+}
+
+export interface GifOptions {
+  scale: number;
+  /** null = every frame, forward, looping */
+  tag: string | null;
+}
+
+export interface GifExport {
+  path: string;
+  report: { frames: number; colors: number; alpha_rounded_pixels: number };
+}
+
+export interface GodotOptions {
+  name?: string | null;
+  sheet: SheetOptions;
+  res_dir?: string | null;
+}
+
+export interface GodotFiles {
+  png: string;
+  tres: string;
+  json: string;
 }
 
 export interface RecoveryInfo {

@@ -1,7 +1,11 @@
 //! Exporters for Dotify documents. All scaling is integer nearest-neighbour
 //! and transparent pixels are preserved exactly.
 
+pub mod gif;
+pub mod godot;
+pub mod meta;
 pub mod project;
+pub mod sheet;
 
 use std::path::Path;
 
@@ -10,6 +14,8 @@ use dotify_core::png_io::{self, PngError};
 use dotify_core::{CoreError, Document, FrameId, Image};
 
 pub const MAX_SCALE: u32 = 64;
+/// Largest exported image side, in pixels.
+pub const MAX_SHEET_SIDE: u32 = 16_384;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
@@ -23,6 +29,12 @@ pub enum ExportError {
     InvalidScale,
     #[error("exported image would be {0} pixels wide/high, larger than the supported maximum")]
     TooLarge(u64),
+    #[error("GIF frames are limited to 255 colors plus transparency; this frame has {0}")]
+    TooManyColors(usize),
+    #[error("GIF encode failed: {0}")]
+    Gif(#[from] ::gif::EncodingError),
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 impl ExportError {
@@ -33,6 +45,9 @@ impl ExportError {
             ExportError::Io(_) => "io_error",
             ExportError::InvalidScale => "invalid_scale",
             ExportError::TooLarge(_) => "too_large",
+            ExportError::TooManyColors(_) => "too_many_colors",
+            ExportError::Gif(_) => "encode_failed",
+            ExportError::InvalidArgument(_) => "invalid_argument",
         }
     }
 }
@@ -50,7 +65,7 @@ pub fn render_frame(doc: &Document, frame: FrameId, scale: u32) -> Result<Image,
         return Err(ExportError::InvalidScale);
     }
     let side = doc.width().max(doc.height()) as u64 * scale as u64;
-    if side > 16_384 {
+    if side > MAX_SHEET_SIDE as u64 {
         return Err(ExportError::TooLarge(side));
     }
     Ok(composite_frame(doc, frame)?.scaled(scale))
@@ -65,6 +80,23 @@ pub fn export_png(doc: &Document, opts: PngExportOptions, path: &Path) -> Result
     let bytes = png_bytes(doc, opts)?;
     write_atomic(path, &bytes)?;
     Ok(())
+}
+
+/// Write a spritesheet PNG to `png_path` and its JSON metadata next to it
+/// (same name, `.json`). Returns the metadata path.
+pub fn export_spritesheet(
+    doc: &Document,
+    opts: &sheet::SheetOptions,
+    pivot: Option<meta::Pivot>,
+    png_path: &Path,
+) -> Result<std::path::PathBuf, ExportError> {
+    let sheet = sheet::pack(doc, opts)?;
+    let image = png_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let json = meta::metadata_json(doc, &sheet, &image, pivot.unwrap_or_else(|| meta::Pivot::center(doc)));
+    let json_path = png_path.with_extension("json");
+    write_atomic(png_path, &png_io::encode_rgba(&sheet.image)?)?;
+    write_atomic(&json_path, json.as_bytes())?;
+    Ok(json_path)
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -84,9 +116,52 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use dotify_core::{Command, Editor, PixelWrite, Rgba};
+    use dotify_core::{Command, Created, Editor, PixelWrite, PlaybackDirection, Rgba};
+
+    /// 4×3, four frames (100, 100, 200, 50 ms), one marked pixel each.
+    /// Tags: "Walk" over frames 0–2 (ping-pong, looping), "Hit" on frame 3
+    /// (forward, once).
+    pub(crate) fn animated_doc() -> Document {
+        let doc = Document::new("Hero", 4, 3).unwrap();
+        let (l, f0) = (doc.layers()[0].id, doc.frames()[0].id);
+        let mut e = Editor::new(doc);
+        let mut frames = vec![f0];
+        for ms in [100, 200, 50] {
+            let out = e.execute(Command::AddFrame { index: None, duration_ms: Some(ms) }).unwrap();
+            let Created::Frame(f) = out.created[0] else { panic!() };
+            frames.push(f);
+        }
+        let marks = [
+            (0, 0, Rgba::opaque(255, 0, 0)),
+            (1, 1, Rgba::opaque(0, 255, 0)),
+            (2, 2, Rgba::new(0, 0, 255, 100)),
+            (3, 2, Rgba::WHITE),
+        ];
+        for (f, (x, y, color)) in frames.iter().zip(marks) {
+            e.execute(Command::SetPixels { layer: l, frame: *f, pixels: vec![PixelWrite { x, y, color }] }).unwrap();
+        }
+        e.execute(Command::CreateTag {
+            name: "Walk".into(),
+            from: frames[0],
+            to: frames[2],
+            direction: Some(PlaybackDirection::PingPong),
+            looping: None,
+            color: None,
+        })
+        .unwrap();
+        e.execute(Command::CreateTag {
+            name: "Hit".into(),
+            from: frames[3],
+            to: frames[3],
+            direction: None,
+            looping: Some(false),
+            color: None,
+        })
+        .unwrap();
+        e.document().clone()
+    }
 
     fn doc() -> Document {
         let doc = Document::new("t", 4, 3).unwrap();

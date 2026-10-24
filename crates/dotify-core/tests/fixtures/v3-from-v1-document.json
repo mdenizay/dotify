@@ -18,7 +18,7 @@
         { "layer": 1, "frame": 2, "x": 1, "y": 1, "width": 3, "height": 2, "file": "cels/1-2.png" },
         { "layer": 3, "frame": 4, "x": 7, "y": 5, "width": 1, "height": 1, "file": "cels/3-4.png" }
       ],
-      "tags": [ { "name": "Idle", "from": 2, "to": 4, "direction": "ping_pong", "color": "#5b8cffff" } ],
+      "tags": [ { "name": "Idle", "from": 2, "to": 4, "direction": "ping_pong", "loop": true, "color": "#5b8cffff" } ],
       "export": { "png_scale": 2 },
       "next_id": 5,
       "extensions": { "com.example.note": "kept" }

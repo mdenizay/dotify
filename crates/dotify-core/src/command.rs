@@ -10,13 +10,28 @@ use serde::{Deserialize, Serialize};
 use crate::color::Rgba;
 use crate::error::{CoreError, CoreResult};
 use crate::geometry::{Bounds, Point};
-use crate::model::{Document, Frame, FrameId, Layer, LayerId, Palette, DEFAULT_FRAME_DURATION_MS};
+use crate::model::{
+    AnimationTag, Document, Frame, FrameId, Layer, LayerId, Palette, PlaybackDirection, DEFAULT_FRAME_DURATION_MS,
+};
 use crate::ops::Op;
 use crate::raster;
 
 pub const MAX_PALETTE_COLORS: usize = 256;
 pub const MAX_FRAME_DURATION_MS: u32 = 60_000;
 pub const MAX_NAME_LEN: usize = 128;
+pub const MAX_TAGS: usize = 256;
+
+/// Colors assigned to new tags that don't specify one, in rotation.
+const TAG_COLORS: [Rgba; 8] = [
+    Rgba::opaque(0x5b, 0x8c, 0xff),
+    Rgba::opaque(0xff, 0x7a, 0x59),
+    Rgba::opaque(0x4c, 0xc9, 0x7a),
+    Rgba::opaque(0xf5, 0xc5, 0x42),
+    Rgba::opaque(0xc0, 0x6c, 0xf0),
+    Rgba::opaque(0x3e, 0xc9, 0xc9),
+    Rgba::opaque(0xff, 0x5f, 0x9e),
+    Rgba::opaque(0x9a, 0xa0, 0xa6),
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct PixelWrite {
@@ -134,6 +149,38 @@ pub enum Command {
         frame: FrameId,
         duration_ms: u32,
     },
+    /// Name an inclusive frame range as an animation. Names are unique.
+    CreateTag {
+        name: String,
+        from: FrameId,
+        to: FrameId,
+        #[serde(default)]
+        direction: Option<PlaybackDirection>,
+        #[serde(default, rename = "loop")]
+        looping: Option<bool>,
+        /// Defaults to the next color in a fixed rotation.
+        #[serde(default)]
+        color: Option<Rgba>,
+    },
+    /// Change any property of the tag currently named `tag`.
+    UpdateTag {
+        tag: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        from: Option<FrameId>,
+        #[serde(default)]
+        to: Option<FrameId>,
+        #[serde(default)]
+        direction: Option<PlaybackDirection>,
+        #[serde(default, rename = "loop")]
+        looping: Option<bool>,
+        #[serde(default)]
+        color: Option<Rgba>,
+    },
+    DeleteTag {
+        tag: String,
+    },
     SetPalette {
         palette: Palette,
     },
@@ -192,6 +239,9 @@ impl Command {
             Command::DeleteFrame { .. } => "Delete Frame",
             Command::MoveFrame { .. } => "Move Frame",
             Command::SetFrameDuration { .. } => "Frame Duration",
+            Command::CreateTag { .. } => "New Tag",
+            Command::UpdateTag { .. } => "Tag Properties",
+            Command::DeleteTag { .. } => "Delete Tag",
             Command::SetPalette { .. } => "Palette",
             Command::RenameDocument { .. } => "Rename",
             Command::Batch { label, .. } => return label.clone().unwrap_or_else(|| "Batch".into()),
@@ -374,7 +424,12 @@ impl Command {
                 if from == *index {
                     return Compiled::none();
                 }
-                Compiled::ops(vec![Op::MoveFrame { id: *frame, index: *index }])
+                let mut ops = Vec::new();
+                if let Some(tags) = tags_after_move(doc, from, *index) {
+                    ops.push(Op::SetTags(tags));
+                }
+                ops.push(Op::MoveFrame { id: *frame, index: *index });
+                Compiled::ops(ops)
             }
             Command::SetFrameDuration { frame, duration_ms } => {
                 let f = doc.frame(*frame)?;
@@ -383,6 +438,48 @@ impl Command {
                     return Compiled::none();
                 }
                 Compiled::ops(vec![Op::SetFrame { frame: Frame { id: *frame, duration_ms } }])
+            }
+            Command::CreateTag { name, from, to, direction, looping, color } => {
+                if doc.tags.len() >= MAX_TAGS {
+                    return Err(invalid(format!("documents are limited to {MAX_TAGS} tags")));
+                }
+                let tag = AnimationTag {
+                    name: validate_name(name)?,
+                    from: *from,
+                    to: *to,
+                    direction: direction.unwrap_or_default(),
+                    looping: looping.unwrap_or(true),
+                    color: color.unwrap_or(TAG_COLORS[doc.tags.len() % TAG_COLORS.len()]),
+                };
+                validate_tag(doc, &tag, None)?;
+                let mut tags = doc.tags.clone();
+                tags.push(tag);
+                Compiled::ops(vec![Op::SetTags(tags)])
+            }
+            Command::UpdateTag { tag, name, from, to, direction, looping, color } => {
+                let index = tag_index(doc, tag)?;
+                let mut t = doc.tags[index].clone();
+                if let Some(n) = name {
+                    t.name = validate_name(n)?;
+                }
+                t.from = from.unwrap_or(t.from);
+                t.to = to.unwrap_or(t.to);
+                t.direction = direction.unwrap_or(t.direction);
+                t.looping = looping.unwrap_or(t.looping);
+                t.color = color.unwrap_or(t.color);
+                validate_tag(doc, &t, Some(index))?;
+                if t == doc.tags[index] {
+                    return Compiled::none();
+                }
+                let mut tags = doc.tags.clone();
+                tags[index] = t;
+                Compiled::ops(vec![Op::SetTags(tags)])
+            }
+            Command::DeleteTag { tag } => {
+                let index = tag_index(doc, tag)?;
+                let mut tags = doc.tags.clone();
+                tags.remove(index);
+                Compiled::ops(vec![Op::SetTags(tags)])
             }
             Command::SetPalette { palette } => {
                 if palette.colors.len() > MAX_PALETTE_COLORS {
@@ -471,13 +568,54 @@ fn validate_duration(ms: u32) -> CoreResult<u32> {
     Ok(ms)
 }
 
+fn tag_index(doc: &Document, name: &str) -> CoreResult<usize> {
+    doc.tags.iter().position(|t| t.name == name).ok_or_else(|| CoreError::TagNotFound(name.to_string()))
+}
+
+/// Check a tag's frames and name. `replacing` is the index of the tag being
+/// updated, which may keep its own name.
+fn validate_tag(doc: &Document, tag: &AnimationTag, replacing: Option<usize>) -> CoreResult<()> {
+    let (from, to) = (doc.frame_index(tag.from)?, doc.frame_index(tag.to)?);
+    if from > to {
+        return Err(invalid(format!("tag {:?} must start at or before its last frame", tag.name)));
+    }
+    if doc.tags.iter().enumerate().any(|(i, t)| Some(i) != replacing && t.name == tag.name) {
+        return Err(invalid(format!("a tag named {:?} already exists", tag.name)));
+    }
+    Ok(())
+}
+
 fn next_layer_name(doc: &Document) -> String {
     (1..).map(|n| format!("Layer {n}")).find(|n| !doc.layers.iter().any(|l| &l.name == n)).expect("unbounded iterator")
 }
 
+/// Tags after moving the frame at `from` to `to`, with endpoints swapped
+/// where the move would put a tag's last frame before its first. `None`
+/// when no tag needs to change.
+fn tags_after_move(doc: &Document, from: usize, to: usize) -> Option<Vec<AnimationTag>> {
+    let mut order: Vec<FrameId> = doc.frames.iter().map(|f| f.id).collect();
+    let id = order.remove(from);
+    order.insert(to, id);
+    let pos = |f: FrameId| order.iter().position(|x| *x == f);
+    let mut changed = false;
+    let tags = doc
+        .tags
+        .iter()
+        .map(|t| {
+            let mut t = t.clone();
+            if pos(t.from) > pos(t.to) {
+                std::mem::swap(&mut t.from, &mut t.to);
+                changed = true;
+            }
+            t
+        })
+        .collect();
+    changed.then_some(tags)
+}
+
 /// Tags after deleting the frame at `index`: endpoints on that frame move
 /// inward; tags that only covered that frame are removed.
-fn tags_without_frame(doc: &Document, index: usize) -> Vec<crate::model::AnimationTag> {
+fn tags_without_frame(doc: &Document, index: usize) -> Vec<AnimationTag> {
     let removed = doc.frames[index].id;
     let neighbor = |dir: isize| {
         let i = index as isize + dir;

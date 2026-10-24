@@ -38,8 +38,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item(app, "save", "Save", Some("CmdOrCtrl+S"))?)
         .item(&item(app, "save_as", "Save As…", Some("CmdOrCtrl+Shift+S"))?)
         .separator()
-        .item(&item(app, "export_png", "Export PNG…", Some("CmdOrCtrl+E"))?)
-        .item(&item(app, "export_all", "Export All Artboards…", Some("CmdOrCtrl+Shift+E"))?)
+        .item(&item(app, "export_png", "Export…", Some("CmdOrCtrl+E"))?)
+        .item(&item(app, "export_godot", "Export for Godot…", Some("CmdOrCtrl+Shift+E"))?)
+        .item(&item(app, "export_all", "Export All Artboards…", Some("CmdOrCtrl+Alt+E"))?)
         .separator()
         .item(&item(app, "close", "Close Window", Some("CmdOrCtrl+W"))?)
         .build()?;

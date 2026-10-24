@@ -2,14 +2,15 @@
 //!
 //! [`export_project`] decides where each artboard goes (`<folder>/<name>`,
 //! with file-system-safe, de-duplicated names) and hands each one to an
-//! [`ArtboardExporter`]. PNG is implemented here; other formats (e.g. Godot
-//! `SpriteFrames`) implement the same trait to get batch export for free.
+//! [`ArtboardExporter`]. PNG and Godot 4 are implemented here; other formats
+//! implement the same trait to get batch export for free.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use dotify_core::{Artboard, ArtboardId, Project};
 
+use crate::godot::{self, GodotOptions};
 use crate::{export_png, ExportError, PngExportOptions};
 
 /// Writes the files for one artboard.
@@ -17,6 +18,11 @@ pub trait ArtboardExporter {
     /// Write `artboard` into `dir` (which exists), naming files after
     /// `stem`. Returns the paths written.
     fn export_artboard(&self, artboard: &Artboard, dir: &Path, stem: &str) -> Result<Vec<PathBuf>, ExportError>;
+
+    /// The file stem for an artboard name, before de-duplication.
+    fn file_stem(&self, name: &str) -> String {
+        sanitize(name)
+    }
 }
 
 /// The first frame of each artboard as `<stem>.png`.
@@ -34,6 +40,27 @@ impl ArtboardExporter for PngArtboardExporter {
     }
 }
 
+/// Each artboard as Godot 4 files: `<stem>.png`, `<stem>.tres` and
+/// `<stem>.json` (see [`godot::export_godot`]).
+#[derive(Clone, Debug, Default)]
+pub struct GodotArtboardExporter {
+    /// Shared by every artboard; `name` is ignored (each uses its stem).
+    pub options: GodotOptions,
+}
+
+impl ArtboardExporter for GodotArtboardExporter {
+    fn export_artboard(&self, artboard: &Artboard, dir: &Path, stem: &str) -> Result<Vec<PathBuf>, ExportError> {
+        let opts = GodotOptions { name: Some(stem.to_string()), ..self.options.clone() };
+        let files = godot::export_godot(artboard.document(), &opts, dir)?;
+        Ok(vec![files.png, files.tres, files.json])
+    }
+
+    /// Godot resource names stay to letters, digits, `-` and `_`.
+    fn file_stem(&self, name: &str) -> String {
+        godot::file_stem(name)
+    }
+}
+
 /// Where one artboard is exported, relative to the export root.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ArtboardTarget {
@@ -45,7 +72,7 @@ pub struct ArtboardTarget {
 
 /// Plan the export layout in library order. Names are unique per directory,
 /// ignoring case, so they are safe on case-insensitive file systems.
-pub fn plan(project: &Project) -> Vec<ArtboardTarget> {
+pub fn plan(project: &Project, exporter: &dyn ArtboardExporter) -> Vec<ArtboardTarget> {
     let mut dirs = BTreeSet::new();
     let folder_dirs: Vec<_> = project.folders().iter().map(|f| (f.id, unique(&mut dirs, &sanitize(&f.name)))).collect();
     let mut taken: Vec<(PathBuf, BTreeSet<String>)> = Vec::new();
@@ -65,7 +92,7 @@ pub fn plan(project: &Project) -> Vec<ArtboardTarget> {
                     &mut taken.last_mut().expect("just pushed").1
                 }
             };
-            let stem = unique(names, &sanitize(a.name()));
+            let stem = unique(names, &exporter.file_stem(a.name()));
             ArtboardTarget { artboard: a.id(), dir, stem }
         })
         .collect()
@@ -78,7 +105,7 @@ pub fn export_project(
     exporter: &dyn ArtboardExporter,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let mut written = Vec::new();
-    for target in plan(project) {
+    for target in plan(project, exporter) {
         let dir = root.join(&target.dir);
         std::fs::create_dir_all(&dir)?;
         written.extend(exporter.export_artboard(project.artboard(target.artboard)?, &dir, &target.stem)?);
@@ -154,7 +181,7 @@ mod tests {
 
     #[test]
     fn plan_sanitizes_and_deduplicates_names() {
-        let plan = plan(&project());
+        let plan = plan(&project(), &PngArtboardExporter { scale: 1 });
         let got: Vec<_> = plan.iter().map(|t| (t.dir.to_string_lossy().into_owned(), t.stem.as_str())).collect();
         assert_eq!(
             got,
@@ -180,5 +207,16 @@ mod tests {
         let grass =
             png_io::decode_rgba(&std::fs::read(dir.path().join("Tiles_Ground/Grass-2.png")).unwrap(), 64).unwrap();
         assert_eq!((grass.width(), grass.height()), (4, 6));
+    }
+
+    #[test]
+    fn exports_godot_files_per_artboard() {
+        let project = project();
+        let dir = tempfile::tempdir().unwrap();
+        let written = export_project(&project, dir.path(), &GodotArtboardExporter::default()).unwrap();
+        assert_eq!(written.len(), 15, "png, tres and json for each of 5 artboards");
+        let tres = std::fs::read_to_string(dir.path().join("Tiles_Ground/Grass-2.tres")).unwrap();
+        assert!(tres.contains("path=\"Grass-2.png\""), "{tres}");
+        assert!(dir.path().join("Hero.png").exists());
     }
 }

@@ -11,6 +11,8 @@ pub enum CoreError {
     FrameNotFound(FrameId),
     #[error("layer {0} is locked")]
     LayerLocked(LayerId),
+    #[error("tag {0:?} does not exist")]
+    TagNotFound(String),
     #[error("a document must keep at least one layer")]
     LastLayer,
     #[error("a document must keep at least one frame")]
@@ -37,6 +39,7 @@ impl CoreError {
             CoreError::LayerNotFound(_) => "layer_not_found",
             CoreError::FrameNotFound(_) => "frame_not_found",
             CoreError::LayerLocked(_) => "layer_locked",
+            CoreError::TagNotFound(_) => "tag_not_found",
             CoreError::LastLayer => "last_layer",
             CoreError::LastFrame => "last_frame",
             CoreError::ArtboardNotFound(_) => "artboard_not_found",

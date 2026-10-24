@@ -1,6 +1,6 @@
 # Design note: project library and artboards
 
-Status: implemented in format version 2.
+Status: implemented in format version 3.
 
 ## Problem
 
@@ -78,14 +78,15 @@ refresh only those thumbnails.
 `Editor` (single document) is unchanged and still used by tests and
 document-level code.
 
-## Format v2
+## Format v3
 
 See `FORMAT.md`. `document.json` now describes the project; each artboard
-entry carries what a v1 document carried (minus the palette), and cel PNGs
-live under `artboards/<id>/cels/`. `min_reader_version` becomes 2 because a
-v1 reader would misread the file. The v1 → v2 migration wraps the v1
+entry carries what a v2 document carried (minus the palette), and cel PNGs
+live under `artboards/<id>/cels/`. `min_reader_version` becomes 3 because an
+older reader would misread the file. The v2 → v3 migration wraps the
 document as a project with one artboard (ID 1, no folder) whose palette
-becomes the project palette; cel file paths are kept as written.
+becomes the project palette; tags (with `loop`) and cel file paths are kept
+as written. v1 files first get v2's `loop` step.
 
 ## Desktop UI
 
@@ -105,10 +106,10 @@ becomes the project palette; cel file paths are kept as written.
 ## Export
 
 `dotify_export::project` exports every artboard in one go through an
-`ArtboardExporter` trait. The PNG exporter writes the first frame of each
-artboard to `<dir>/<folder>/<artboard>.png` with sanitized, de-duplicated
-file names. The Godot exporter can implement the same trait to produce
-`SpriteFrames`/atlases per artboard without touching the batch logic.
+`ArtboardExporter` trait, into `<dir>/<folder>/` with sanitized,
+de-duplicated file names. The PNG exporter writes each artboard's first
+frame as `<artboard>.png`; the Godot exporter writes its spritesheet,
+`SpriteFrames` `.tres` and `.json`. New formats only implement the trait.
 
 ## Out of scope for now
 

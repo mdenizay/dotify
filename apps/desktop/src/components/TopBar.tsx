@@ -174,12 +174,12 @@ export function TopBar() {
         <Redo2 size={15} strokeWidth={1.75} />
       </IconButton>
       <Divider />
-      <IconButton label="Export PNG" shortcut="⌘E" onClick={() => setEditor({ exportOpen: true })}>
+      <IconButton label="Export" shortcut="⌘E" onClick={() => setEditor({ exportOpen: true })}>
         <Download size={15} strokeWidth={1.75} />
       </IconButton>
       <IconButton
         label="Export all artboards"
-        shortcut="⇧⌘E"
+        shortcut="⌥⌘E"
         onClick={() => setEditor({ exportAllOpen: true })}
       >
         <FolderDown size={15} strokeWidth={1.75} />

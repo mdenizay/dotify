@@ -1,8 +1,11 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
+import type { OnionSkin } from "../canvas/onion";
+import type { PlayMode } from "../canvas/playback";
 import type {
   ArtboardSummary,
   Folder,
+  AnimationTag,
   Frame,
   FrameId,
   Hex,
@@ -10,6 +13,7 @@ import type {
   LayerId,
   RecoveryInfo,
   SessionView,
+  SheetOptions,
 } from "../engine/types";
 
 export type ToolId =
@@ -19,6 +23,11 @@ export type Theme = "dark" | "light";
 
 /** `editor` edits the active artboard; `overview` shows all artboards. */
 export type Mode = "editor" | "overview";
+export type ExportKind = "png" | "sheet" | "gif" | "godot";
+
+/** The tag dialog: creating over a frame range, or editing a tag by name. */
+export type TagDialog =
+  { mode: "create"; from: FrameId; to: FrameId } | { mode: "edit"; tag: string } | null;
 
 /** "paint" mirrors strokes across the axes; "guide" only shows where the mirror would land. */
 export type SymmetryMode = "paint" | "guide";
@@ -34,9 +43,16 @@ interface Prefs {
   fillContiguous: boolean;
   rightPanelWidth: number;
   timelineOpen: boolean;
+  previewOpen: boolean;
   exportScale: number;
   libraryOpen: boolean;
   libraryWidth: number;
+  exportKind: ExportKind;
+  /** Spritesheet layout shared by the sheet and Godot exports (scale is `exportScale`). */
+  exportSheet: Omit<SheetOptions, "scale">;
+  godotResDir: string;
+  onion: OnionSkin;
+  playMode: PlayMode;
 }
 
 export interface EditorState extends Prefs {
@@ -60,6 +76,14 @@ export interface EditorState extends Prefs {
   exportOpen: boolean;
   exportAllOpen: boolean;
   recovery: RecoveryInfo | null;
+  /** Timeline playback is running (the canvas shows composites, editing pauses it). */
+  playing: boolean;
+  previewPlaying: boolean;
+  /** Tag to play and preview; null = every frame using `playMode`. */
+  playTag: string | null;
+  /** Other end of a shift-click frame range; the active frame is the first end. */
+  frameAnchor: FrameId | null;
+  tagDialog: TagDialog;
 }
 
 const PREFS_KEY = "dotify.prefs.v1";
@@ -75,9 +99,15 @@ const defaults: Prefs = {
   fillContiguous: true,
   rightPanelWidth: 264,
   timelineOpen: true,
+  previewOpen: true,
   exportScale: 1,
   libraryOpen: true,
   libraryWidth: 232,
+  exportKind: "png",
+  exportSheet: { layout: "grid", columns: null, padding: 0, extrude: 0 },
+  godotResDir: "",
+  onion: { enabled: false, prev: 1, next: 1, opacity: 40, tint: true },
+  playMode: "loop",
 };
 
 function loadPrefs(): Prefs {
@@ -109,6 +139,11 @@ export const useEditor = create<EditorState>()(() => ({
   exportOpen: false,
   exportAllOpen: false,
   recovery: null,
+  playing: false,
+  previewPlaying: true,
+  playTag: null,
+  frameAnchor: null,
+  tagDialog: null,
 }));
 
 export const setEditor = useEditor.setState;
@@ -162,9 +197,25 @@ export const selectActiveArtboard = (s: EditorState) => s.session?.active_artboa
 
 /** True while a modal dialog is open (single-key shortcuts are disabled). */
 export const dialogOpen = (s: EditorState) =>
-  s.newDocOpen || s.newArtboardOpen || s.exportOpen || s.exportAllOpen || s.recovery !== null;
+  s.newDocOpen ||
+  s.newArtboardOpen ||
+  s.exportOpen ||
+  s.exportAllOpen ||
+  s.recovery !== null ||
+  s.tagDialog !== null;
+const NO_TAGS: AnimationTag[] = [];
 export const selectLayers = (s: EditorState) => s.session?.summary.layers ?? NO_LAYERS;
 export const selectFrames = (s: EditorState) => s.session?.summary.frames ?? NO_FRAMES;
+export const selectTags = (s: EditorState) => s.session?.summary.tags ?? NO_TAGS;
+
+/** Timeline index range selected with shift-click (or just the active frame). */
+export function selectedRange(s: EditorState): [number, number] | null {
+  const frames = selectFrames(s);
+  const a = frames.findIndex((f) => f.id === s.activeFrameId);
+  if (a < 0) return null;
+  const b = frames.findIndex((f) => f.id === s.frameAnchor);
+  return b < 0 ? [a, a] : [Math.min(a, b), Math.max(a, b)];
+}
 
 export const selectSummary = (s: EditorState) => s.session?.summary ?? null;
 

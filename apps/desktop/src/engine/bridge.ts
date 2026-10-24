@@ -4,12 +4,17 @@ import type {
   EngineError,
   ExportAllResult,
   FrameId,
+  GifExport,
+  GifOptions,
+  GodotFiles,
+  GodotOptions,
   LayerId,
   Outcome,
   ProjectCommand,
   Rect,
   RecoveryInfo,
   SessionView,
+  SheetOptions,
 } from "./types";
 
 /** Typed wrappers over the Tauri IPC commands in src-tauri/src/commands.rs. */
@@ -46,7 +51,16 @@ export const engine = {
   },
   exportPng: (artboard: ArtboardId, frame: FrameId, scale: number) =>
     invoke<string | null>("export_png", { artboard, frame, scale }),
-  exportAllPng: (scale: number) => invoke<ExportAllResult | null>("export_all_png", { scale }),
+  /** Every artboard: first-frame PNGs, or Godot files when `godot` is given. */
+  exportAll: (scale: number, godot: GodotOptions | null) =>
+    invoke<ExportAllResult | null>("export_all", { scale, godot }),
+  /** All visible layers of an artboard frame, composited by the engine. */
+  async readFrame(artboard: ArtboardId, frame: FrameId): Promise<Uint8ClampedArray<ArrayBuffer>> {
+    return new Uint8ClampedArray(await invoke<ArrayBuffer>("read_frame", { artboard, frame }));
+  },
+  exportSheet: (options: SheetOptions) => invoke<string | null>("export_sheet", { options }),
+  exportGif: (options: GifOptions) => invoke<GifExport | null>("export_gif", { options }),
+  exportGodot: (options: GodotOptions) => invoke<GodotFiles | null>("export_godot", { options }),
   recoveryStatus: () => invoke<RecoveryInfo | null>("recovery_status"),
   recoveryRestore: () => invoke<SessionView>("recovery_restore"),
   recoveryDiscard: () => invoke<null>("recovery_discard"),

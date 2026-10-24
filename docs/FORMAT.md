@@ -1,6 +1,6 @@
 # The `.dotify` Project Format
 
-Status: **format version 2** (implemented in `crates/dotify-core/src/format`).
+Status: **format version 3** (implemented in `crates/dotify-core/src/format`).
 
 A `.dotify` file is a ZIP archive holding one *project*: a library of
 artboards (sprites), each with its own canvas size, layers, frames, cels and
@@ -30,8 +30,8 @@ deflate-compressed.
 ```json
 {
   "format": "dotify",
-  "format_version": 2,
-  "min_reader_version": 2,
+  "format_version": 3,
+  "min_reader_version": 3,
   "generator": "dotify 0.1.0",
   "entries": {
     "document.json": "sha256:…",
@@ -72,7 +72,8 @@ deflate-compressed.
           "file": "artboards/1/cels/1-2.png" }
       ],
       "tags": [
-        { "name": "Idle", "from": 2, "to": 2, "direction": "forward", "color": "#5b8cffff" }
+        { "name": "Idle", "from": 2, "to": 2, "direction": "forward", "loop": true,
+          "color": "#5b8cffff" }
       ],
       "export": { "png_scale": 1 },
       "next_id": 3,
@@ -96,7 +97,10 @@ Rules:
   from its own `next_id` and are scoped to that artboard.
 - Layer order is bottom → top; frame order is playback order.
 - `from`/`to` in tags are **frame IDs**, so tags survive frame reordering
-  and are independent of pixel data.
+  and are independent of pixel data. `from` never comes after `to` in
+  timeline order (moving frames swaps the endpoints when needed). Tag names
+  are unique. `direction` is `forward`, `reverse` or `ping_pong`; `loop`
+  says whether the range repeats.
 - Cel `x`/`y`/`width`/`height` describe where the trimmed PNG sits inside
   the canvas. Cels that would be fully transparent are omitted.
 - Colors are `#rrggbbaa` (straight alpha).
@@ -119,12 +123,14 @@ On load the reader:
 Migrations live in `crates/dotify-core/src/format/migrate.rs`. Every format
 change must add a migration and a test fixture (`crates/dotify-core/tests/fixtures`).
 
-| Step | Change |
-|------|--------|
-| 1 → 2 | The v1 single document becomes a project with one artboard (ID 1, no folder, project `next_id` 2). Its `palette` moves to the project; everything else, including cel `file` paths and `extensions`, moves into the artboard unchanged. The project is named after the document. |
+| Version | Change | Migration |
+|---------|--------|-----------|
+| 1 | Initial format | – |
+| 2 | Tags gain `loop` | Every v1 tag gets `"loop": true`. `min_reader_version` stays 1: older readers ignore the field. |
+| 3 | Project of artboards (see [`LIBRARY.md`](LIBRARY.md)) | The single document becomes a project with one artboard (ID 1, no folder, project `next_id` 2). Its `palette` moves to the project; everything else, including tags with their `loop` flags, cel `file` paths and `extensions`, moves into the artboard unchanged. The project is named after the document. `min_reader_version` becomes 3: an older reader must not open a project it would misread as a single document. |
 
-`min_reader_version` is 2 for files written by this version: a v1 reader
-must not open a project it would misread as a single document.
+Steps run in order, so a v1 file goes through 1 → 2 → 3 and a v2 file only
+through 2 → 3.
 
 ## Atomic writes
 

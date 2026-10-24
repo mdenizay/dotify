@@ -2,11 +2,19 @@
 
 ## Unreleased
 
+- Timeline playback with loop, once and ping-pong modes, honoring per-frame durations
+- Onion skinning with configurable previous/next frame counts, opacity and tint
+- Animation tags: create, rename, recolor, retime, set direction and loop, delete — all undoable
+- Live preview panel that keeps playing while you draw
+- Export dialog for PNG, spritesheet (grid or row per tag, padding, extrude) + JSON metadata, animated GIF and Godot 4
+- Godot 4 export: spritesheet PNG plus a `SpriteFrames` `.tres` with one animation per tag
+- CLI: `export-sheet`, `export-gif` and `export-godot`
+- Project format version 2: tags gain a `loop` flag (older files open with every tag looping)
 - Project library: one `.dotify` project now holds many artboards (sprites), each with its own size, layers, frames and tags, sharing one palette
 - Library sidebar with thumbnails, folders, search, drag and drop and a context menu (rename, duplicate, move, delete)
 - Artboard overview: all artboards side by side with pan and zoom; double-click one to edit it
-- Export all artboards as PNG in one go, with one sub-folder per library folder (also `dotify export-all`)
-- `.dotify` format version 2; version 1 files open as a project with one artboard
+- Export all artboards in one go, as PNG or Godot 4 SpriteFrames, with one sub-folder per library folder (⌥⌘E, or `dotify export-all [--godot]`)
+- Project format version 3: a project of artboards; version 1 and 2 files open as a project with one artboard
 
 ## 0.1.2
 

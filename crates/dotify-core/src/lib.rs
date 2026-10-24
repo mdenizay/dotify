@@ -21,7 +21,7 @@ pub use editor::{DirtyRegion, DocumentSummary, Editor, Outcome};
 pub use error::{CoreError, CoreResult};
 pub use geometry::{Point, Rect};
 pub use image::Image;
-pub use model::{AnimationTag, Document, Frame, FrameId, Layer, LayerId, Palette};
+pub use model::{AnimationTag, Document, Frame, FrameId, Layer, LayerId, Palette, PlaybackDirection};
 pub use project::{
     Artboard, ArtboardId, Folder, FolderId, Project, ProjectCommand, ProjectEditor, ProjectOutcome, ProjectSummary,
 };

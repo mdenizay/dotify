@@ -21,9 +21,9 @@ use crate::project::{ArtboardId, Folder, FolderId, Project, ProjectParts};
 use crate::MAX_CANVAS_SIZE;
 
 /// Format version written by this build.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 /// Oldest reader version able to open files written by this build.
-pub const MIN_READER_VERSION: u32 = 2;
+pub const MIN_READER_VERSION: u32 = 3;
 pub const MIMETYPE: &str = "application/x-dotify";
 pub const FILE_EXTENSION: &str = "dotify";
 
@@ -392,6 +392,15 @@ mod tests {
         .unwrap();
         e.execute(edit(Command::CreateLayer { name: Some("Empty".into()), index: None })).unwrap();
         e.execute(edit(Command::DuplicateFrame { frame: f })).unwrap();
+        e.execute(edit(Command::CreateTag {
+            name: "Blink".into(),
+            from: f,
+            to: f,
+            direction: Some(crate::model::PlaybackDirection::PingPong),
+            looping: Some(false),
+            color: None,
+        }))
+        .unwrap();
         e.execute(edit(Command::UpdateLayer {
             layer: l,
             name: None,
@@ -553,6 +562,23 @@ mod tests {
             Some(serde_json::to_vec(&m).unwrap())
         });
         assert_eq!(from_bytes(&newer).unwrap(), sample());
+    }
+
+    #[test]
+    fn opens_v2_fixture_and_keeps_tag_looping() {
+        // Written by the format-v2 CLI (tags with `loop`, single document).
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v2-walk.dotify");
+        let project = load(&path).unwrap();
+        let [artboard] = project.artboards() else { panic!("expected one artboard") };
+        let doc = artboard.document();
+        assert_eq!((project.name(), artboard.name(), doc.width(), doc.height()), ("Walker", "Walker", 6, 4));
+        assert_eq!(project.palette().name, "Two");
+        let tags: Vec<_> = doc.tags().iter().map(|t| (t.name.as_str(), t.from.0, t.to.0, t.looping)).collect();
+        assert_eq!(tags, [("Walk", 2, 3, true), ("Die", 4, 4, false)]);
+        assert_eq!(doc.cel_image(LayerId(1), FrameId(3)).get(5, 3), Rgba::opaque(0, 0xaa, 0xff));
+        let back = from_bytes(&to_bytes(&project, WriteOptions::default()).unwrap()).unwrap();
+        assert_eq!(back, project);
+        assert!(!back.artboards()[0].document().tags()[1].looping);
     }
 
     #[test]
