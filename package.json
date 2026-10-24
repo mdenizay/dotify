@@ -1,0 +1,15 @@
+{
+  "name": "dotify-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "dev": "pnpm --filter @dotify/desktop tauri dev",
+    "build": "pnpm --filter @dotify/desktop tauri build",
+    "web:dev": "pnpm --filter @dotify/desktop dev",
+    "test": "cargo test --workspace && pnpm --filter @dotify/desktop test",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && pnpm --filter @dotify/desktop lint",
+    "format": "cargo fmt --all && pnpm --filter @dotify/desktop format",
+    "format:check": "cargo fmt --all -- --check && pnpm --filter @dotify/desktop format:check",
+    "typecheck": "pnpm --filter @dotify/desktop typecheck"
+  }
+}

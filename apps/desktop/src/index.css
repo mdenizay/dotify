@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/* Design tokens. Components use the Tailwind aliases defined in @theme. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #17181b;
+  --panel: #1d1e22;
+  --panel-raised: #25262b;
+  --hover: #2c2d33;
+  --border: #2e2f35;
+  --border-strong: #3b3c43;
+  --text: #e7e7ea;
+  --text-dim: #9d9ea6;
+  --text-faint: #6b6c74;
+  --accent: #ff5a5f;
+  --accent-soft: #ff5a5f26;
+  --accent-text: #ffffff;
+  --workspace: #111214;
+  --check-a: #2b2c31;
+  --check-b: #222327;
+  --grid: #ffffff24;
+  --focus: #ff8a8e;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e9e7e3;
+  --panel: #f5f4f1;
+  --panel-raised: #ffffff;
+  --hover: #e6e4e0;
+  --border: #dad7d1;
+  --border-strong: #c8c4bd;
+  --text: #1e1e20;
+  --text-dim: #66656b;
+  --text-faint: #9a9892;
+  --accent: #e8464c;
+  --accent-soft: #e8464c1f;
+  --accent-text: #ffffff;
+  --workspace: #d6d3cd;
+  --check-a: #ffffff;
+  --check-b: #e4e2de;
+  --grid: #00000024;
+  --focus: #e8464c;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--panel-raised);
+  --color-hover: var(--hover);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--text);
+  --color-dim: var(--text-dim);
+  --color-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-workspace: var(--workspace);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+canvas:focus-visible {
+  outline: none;
+}
+
+/* Transparency checkerboard for swatches. */
+.checker {
+  background-color: var(--check-a);
+  background-image:
+    linear-gradient(
+      45deg,
+      var(--check-b) 25%,
+      transparent 25%,
+      transparent 75%,
+      var(--check-b) 75%
+    ),
+    linear-gradient(45deg, var(--check-b) 25%, transparent 25%, transparent 75%, var(--check-b) 75%);
+  background-size: 8px 8px;
+  background-position:
+    0 0,
+    4px 4px;
+}
+
+.pixelated {
+  image-rendering: pixelated;
+}
+
+input[type="range"].slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+}
+input[type="range"].slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+input[type="range"].slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+input[type="number"]::-webkit-inner-spin-button {
+  opacity: 0.4;
+}

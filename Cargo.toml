@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dotify-core",
+    "crates/dotify-export",
+    "crates/dotify-cli",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dotify-app/dotify"
+rust-version = "1.85"
+
+[workspace.dependencies]
+dotify-core = { path = "crates/dotify-core" }
+dotify-export = { path = "crates/dotify-export" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+png = "0.18"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

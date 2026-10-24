@@ -1,0 +1,108 @@
+# Dotify
+
+A lightweight, open-source pixel art editor and sprite animation studio for
+indie game developers — built so that AI assistants can eventually drive it
+through the same command engine you use by hand.
+
+> **Status: Phase 1 (functional pixel editor).** macOS first; Windows and
+> Linux are planned. See the [roadmap](docs/ARCHITECTURE.md#roadmap).
+
+## What works today
+
+- Tauri 2 desktop app with a native macOS menu and dark/light themes
+- Pixel-exact canvas: integer zoom (100%–12800%), pan (Space/middle-drag/
+  trackpad), HiDPI aware, optional pixel grid
+- Tools: pencil and eraser (1–32 px square brush), bucket fill (contiguous
+  or global), line, rectangle, ellipse (outline/filled, Shift for square),
+  eyedropper (Alt while drawing), hand
+- Horizontal/vertical symmetry for every drawing tool
+- Primary/secondary colors (left/right click), HSV + alpha picker, editable
+  palette (PICO-8 default)
+- Layers: create, duplicate, delete, rename, reorder, visibility, lock,
+  opacity
+- Frames: add, duplicate, delete, reorder, per-frame duration (playback
+  arrives in Phase 2)
+- Undo/redo of every edit, with labels
+- Native `.dotify` project format (versioned ZIP, lossless, checksummed),
+  atomic saves, autosave with crash recovery
+- PNG export at 1×–16× with nearest-neighbour scaling
+- `dotify` CLI for headless editing and export
+
+## Getting started
+
+Requirements: Rust (stable, ≥ 1.85), Node.js ≥ 20, pnpm 10, and Xcode
+command line tools on macOS.
+
+```bash
+pnpm install
+```
+
+```bash
+pnpm dev
+```
+
+`pnpm dev` starts Vite and the Tauri app with hot reload. Other scripts:
+
+| Command            | What it does                                        |
+|--------------------|-----------------------------------------------------|
+| `pnpm build`       | Release build and macOS bundle (`target/release/bundle`) |
+| `pnpm test`        | Rust workspace tests + frontend unit tests          |
+| `pnpm lint`        | `cargo clippy -D warnings` + ESLint                 |
+| `pnpm format`      | `cargo fmt` + Prettier                              |
+| `pnpm typecheck`   | Strict TypeScript check                             |
+
+### CLI
+
+```bash
+cargo run -p dotify-cli -- new hero.dotify --width 32 --height 32
+```
+
+```bash
+cargo run -p dotify-cli -- info hero.dotify
+```
+
+```bash
+echo '[{"type":"draw_rectangle","layer":1,"frame":2,"x":4,"y":4,"width":8,"height":8,"color":"#ff004d","filled":true}]' | cargo run -p dotify-cli -- apply hero.dotify -
+```
+
+```bash
+cargo run -p dotify-cli -- export-png hero.dotify hero.png --scale 8
+```
+
+`apply` takes the same JSON commands as the desktop app (see
+`crates/dotify-core/src/command.rs`); an array is applied atomically.
+
+## Keyboard shortcuts
+
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| B | Pencil | E | Eraser |
+| G | Bucket fill | L | Line |
+| U | Rectangle | O / ⇧U | Ellipse |
+| I | Eyedropper | H | Hand |
+| X | Swap colors | [ / ] | Brush size |
+| , / . | Previous / next frame | ⇧N | New layer |
+| Space | Pan while held | Alt | Eyedropper while held |
+| ⌘Z / ⇧⌘Z | Undo / redo | ⌘= / ⌘− | Zoom |
+| ⌘0 | Fit | ⌘1 | Actual size |
+| ⌘' | Pixel grid | ⌘E | Export PNG |
+
+## Project layout
+
+```
+crates/dotify-core     document model, commands, undo/redo, compositing, .dotify format
+crates/dotify-export   PNG export (GIF, spritesheets and metadata next)
+crates/dotify-cli      headless `dotify` binary
+apps/desktop           Tauri + React app (src/ = UI, src-tauri/ = native shell)
+docs/                  ARCHITECTURE.md, FORMAT.md
+```
+
+Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before contributing and
+[docs/FORMAT.md](docs/FORMAT.md) for the file format.
+
+## License
+
+Dual-licensed under either of [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE) at your option — the standard choice in the
+Rust ecosystem, permissive for game developers, and Apache-2.0 adds an
+explicit patent grant. Contributions are accepted under the same terms.

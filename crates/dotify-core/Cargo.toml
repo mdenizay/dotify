@@ -1,0 +1,18 @@
+[package]
+name = "dotify-core"
+description = "Dotify document model, command engine, history and project format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+png.workspace = true
+zip.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
