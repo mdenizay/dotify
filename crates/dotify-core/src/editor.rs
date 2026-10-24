@@ -273,6 +273,9 @@ mod tests {
     use crate::color::Rgba;
     use crate::command::PixelWrite;
     use crate::geometry::Point;
+    use crate::model::PlaybackDirection;
+
+    const TAG_COLORS_FIRST: Rgba = Rgba::opaque(0x5b, 0x8c, 0xff);
 
     const RED: Rgba = Rgba::opaque(255, 0, 0);
     const BLUE: Rgba = Rgba::opaque(0, 0, 255);
@@ -493,13 +496,147 @@ mod tests {
         assert_eq!(e.document().frame(f2).unwrap().duration_ms, 250);
         assert!(e.execute(Command::SetFrameDuration { frame: f2, duration_ms: 0 }).is_err());
 
-        e.doc.tags =
-            vec![AnimationTag { name: "Walk".into(), from: f1, to: f2, direction: Default::default(), color: RED }];
+        e.execute(tag_cmd("Walk", f1, f2)).unwrap();
         e.execute(Command::DeleteFrame { frame: f1 }).unwrap();
         assert_eq!((e.document().tags()[0].from, e.document().tags()[0].to), (f2, f2));
         e.undo().unwrap();
         assert_eq!(e.document().tags()[0].from, f1);
         assert_eq!(px(&e, l, f1, 1, 1), BLUE);
+    }
+
+    fn tag_cmd(name: &str, from: FrameId, to: FrameId) -> Command {
+        Command::CreateTag { name: name.into(), from, to, direction: None, looping: None, color: None }
+    }
+
+    #[derive(Default)]
+    struct TagPatch {
+        name: Option<String>,
+        from: Option<FrameId>,
+        to: Option<FrameId>,
+        direction: Option<PlaybackDirection>,
+        looping: Option<bool>,
+        color: Option<Rgba>,
+    }
+
+    fn update_tag(tag: &str, p: TagPatch) -> Command {
+        let TagPatch { name, from, to, direction, looping, color } = p;
+        Command::UpdateTag { tag: tag.into(), name, from, to, direction, looping, color }
+    }
+
+    fn three_frames() -> (Editor, [FrameId; 3]) {
+        let (mut e, _, f1) = editor();
+        let mut ids = [f1; 3];
+        for id in &mut ids[1..] {
+            let Created::Frame(f) = e.execute(Command::AddFrame { index: None, duration_ms: None }).unwrap().created[0]
+            else {
+                panic!()
+            };
+            *id = f;
+        }
+        (e, ids)
+    }
+
+    #[test]
+    fn tag_lifecycle_undo_redo() {
+        let (mut e, [f1, f2, f3]) = three_frames();
+        let empty = e.document().clone();
+
+        let out = e.execute(tag_cmd("Idle", f1, f2)).unwrap();
+        assert!(out.structure_changed);
+        assert_eq!(e.undo_label(), Some("New Tag"));
+        let tag = &e.document().tags()[0];
+        assert_eq!((tag.from, tag.to, tag.direction, tag.looping), (f1, f2, PlaybackDirection::Forward, true));
+        assert_eq!(tag.color, TAG_COLORS_FIRST);
+        let created = e.document().clone();
+
+        e.execute(update_tag(
+            "Idle",
+            TagPatch {
+                name: Some("Run".into()),
+                to: Some(f3),
+                direction: Some(PlaybackDirection::PingPong),
+                looping: Some(false),
+                color: Some(BLUE),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
+        let tag = e.document().tag("Run").unwrap().clone();
+        assert_eq!((tag.to, tag.direction, tag.looping, tag.color), (f3, PlaybackDirection::PingPong, false, BLUE));
+        assert_eq!(e.document().tag_range(&tag).unwrap(), 0..=2);
+        let updated = e.document().clone();
+
+        e.execute(Command::DeleteTag { tag: "Run".into() }).unwrap();
+        assert!(e.document().tags().is_empty());
+
+        e.undo().unwrap();
+        assert_eq!(e.document(), &updated);
+        e.undo().unwrap();
+        assert_eq!(e.document(), &created);
+        e.undo().unwrap();
+        assert_eq!(e.document(), &empty);
+        e.redo().unwrap();
+        e.redo().unwrap();
+        assert_eq!(e.document(), &updated);
+        e.redo().unwrap();
+        assert!(e.document().tags().is_empty());
+    }
+
+    #[test]
+    fn tag_validation() {
+        let (mut e, [f1, f2, f3]) = three_frames();
+        e.execute(tag_cmd("Idle", f1, f2)).unwrap();
+        let before = e.document().clone();
+        let code = |r: CoreResult<Outcome>| r.unwrap_err().code();
+        assert_eq!(code(e.execute(tag_cmd("Idle", f2, f3))), "invalid_argument");
+        assert_eq!(code(e.execute(tag_cmd("Back", f3, f1))), "invalid_argument");
+        assert_eq!(code(e.execute(tag_cmd(" ", f1, f1))), "invalid_argument");
+        assert_eq!(code(e.execute(tag_cmd("Gone", f1, FrameId(999)))), "frame_not_found");
+        assert_eq!(code(e.execute(Command::DeleteTag { tag: "Nope".into() })), "tag_not_found");
+        e.execute(tag_cmd("Walk", f3, f3)).unwrap();
+        assert_eq!(
+            code(e.execute(update_tag("Walk", TagPatch { name: Some("Idle".into()), ..Default::default() }))),
+            "invalid_argument"
+        );
+        e.undo().unwrap();
+        assert_eq!(e.document(), &before);
+        // Renaming to its own name and other no-ops skip history.
+        let out = e.execute(update_tag("Idle", TagPatch { name: Some("Idle".into()), ..Default::default() })).unwrap();
+        assert!(!out.changed);
+    }
+
+    #[test]
+    fn moving_frames_keeps_tags_ordered() {
+        let (mut e, [f1, f2, f3]) = three_frames();
+        e.execute(tag_cmd("Walk", f1, f2)).unwrap();
+        let before = e.document().clone();
+        e.execute(Command::MoveFrame { frame: f1, index: 2 }).unwrap();
+        let tag = &e.document().tags()[0];
+        assert_eq!((tag.from, tag.to), (f2, f1));
+        assert_eq!(e.document().tag_range(tag).unwrap(), 0..=2);
+        e.undo().unwrap();
+        assert_eq!(e.document(), &before);
+        // Moves that keep the order leave tags alone.
+        e.execute(Command::MoveFrame { frame: f3, index: 0 }).unwrap();
+        assert_eq!((e.document().tags()[0].from, e.document().tags()[0].to), (f1, f2));
+    }
+
+    #[test]
+    fn tag_commands_deserialize_from_json() {
+        let json = r##"{"type":"update_tag","tag":"Idle","loop":false,"direction":"ping_pong","color":"#ff0000"}"##;
+        let cmd: Command = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            cmd,
+            update_tag(
+                "Idle",
+                TagPatch {
+                    looping: Some(false),
+                    direction: Some(PlaybackDirection::PingPong),
+                    color: Some(RED),
+                    ..Default::default()
+                }
+            )
+        );
     }
 
     #[test]

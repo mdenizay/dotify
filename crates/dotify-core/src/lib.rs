@@ -20,7 +20,7 @@ pub use editor::{DirtyRegion, DocumentSummary, Editor, Outcome};
 pub use error::{CoreError, CoreResult};
 pub use geometry::{Point, Rect};
 pub use image::Image;
-pub use model::{AnimationTag, Document, Frame, FrameId, Layer, LayerId, Palette};
+pub use model::{AnimationTag, Document, Frame, FrameId, Layer, LayerId, Palette, PlaybackDirection};
 
 /// Largest supported canvas side, in pixels.
 pub const MAX_CANVAS_SIZE: u32 = 4096;

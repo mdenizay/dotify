@@ -116,7 +116,14 @@ pub struct AnimationTag {
     pub to: FrameId,
     #[serde(default)]
     pub direction: PlaybackDirection,
+    /// Repeat the range when it ends (otherwise stop on the last frame).
+    #[serde(rename = "loop", default = "default_true")]
+    pub looping: bool,
     pub color: Rgba,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -219,6 +226,17 @@ impl Document {
         self.layers.iter().position(|l| l.id == id).ok_or(CoreError::LayerNotFound(id))
     }
 
+    pub fn tag(&self, name: &str) -> CoreResult<&AnimationTag> {
+        self.tags.iter().find(|t| t.name == name).ok_or_else(|| CoreError::TagNotFound(name.to_string()))
+    }
+
+    /// Frame indices covered by `tag`, in timeline order. Endpoints may have
+    /// been swapped by reordering frames, so the range is normalized.
+    pub fn tag_range(&self, tag: &AnimationTag) -> CoreResult<std::ops::RangeInclusive<usize>> {
+        let (a, b) = (self.frame_index(tag.from)?, self.frame_index(tag.to)?);
+        Ok(a.min(b)..=a.max(b))
+    }
+
     pub fn frame_index(&self, id: FrameId) -> CoreResult<usize> {
         self.frames.iter().position(|f| f.id == id).ok_or(CoreError::FrameNotFound(id))
     }
@@ -309,9 +327,13 @@ impl DocumentParts {
                 return invalid(format!("cel ({l}, {f}) has the wrong size"));
             }
         }
+        let mut names = std::collections::BTreeSet::new();
         for tag in &self.tags {
             if !self.frames.iter().any(|f| f.id == tag.from) || !self.frames.iter().any(|f| f.id == tag.to) {
                 return invalid(format!("tag {:?} references a missing frame", tag.name));
+            }
+            if !names.insert(tag.name.as_str()) {
+                return invalid(format!("duplicate tag name {:?}", tag.name));
             }
         }
         Ok(Document {
