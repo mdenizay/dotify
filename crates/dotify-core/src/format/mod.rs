@@ -15,14 +15,15 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::composite::composite_frame;
 use crate::geometry::Rect;
 use crate::image::Image;
-use crate::model::{AnimationTag, Document, DocumentParts, ExportSettings, Frame, FrameId, Layer, LayerId, Palette};
+use crate::model::{AnimationTag, DocumentParts, ExportSettings, Frame, FrameId, Layer, LayerId, Palette};
 use crate::png_io::{self, PngError};
+use crate::project::{ArtboardId, Folder, FolderId, Project, ProjectParts};
 use crate::MAX_CANVAS_SIZE;
 
 /// Format version written by this build.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 /// Oldest reader version able to open files written by this build.
-pub const MIN_READER_VERSION: u32 = 1;
+pub const MIN_READER_VERSION: u32 = 2;
 pub const MIMETYPE: &str = "application/x-dotify";
 pub const FILE_EXTENSION: &str = "dotify";
 
@@ -92,15 +93,32 @@ struct CelEntry {
     file: String,
 }
 
+/// `document.json`: the project.
 #[derive(Serialize, Deserialize)]
-struct DocumentFile {
+struct ProjectFile {
+    name: String,
+    palette: Palette,
+    #[serde(default)]
+    folders: Vec<Folder>,
+    artboards: Vec<ArtboardFile>,
+    #[serde(default)]
+    next_id: u32,
+    #[serde(default)]
+    extensions: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One artboard: everything a v1 document stored, minus the palette.
+#[derive(Serialize, Deserialize)]
+struct ArtboardFile {
+    id: ArtboardId,
+    #[serde(default)]
+    folder: Option<FolderId>,
     name: String,
     width: u32,
     height: u32,
     layers: Vec<Layer>,
     frames: Vec<Frame>,
     cels: Vec<CelEntry>,
-    palette: Palette,
     #[serde(default)]
     tags: Vec<AnimationTag>,
     #[serde(default)]
@@ -132,32 +150,46 @@ impl Default for WriteOptions {
     }
 }
 
-/// Serialize `doc` into a `.dotify` archive.
-pub fn write<W: Write + Seek>(doc: &Document, writer: W, opts: WriteOptions) -> Result<(), FormatError> {
+/// Serialize `project` into a `.dotify` archive.
+pub fn write<W: Write + Seek>(project: &Project, writer: W, opts: WriteOptions) -> Result<(), FormatError> {
     let mut entries: Vec<(String, Vec<u8>, CompressionMethod)> = Vec::new();
-    let mut cels = Vec::new();
-    for (layer, frame, img) in doc.cels() {
-        let Some(rect) = img.opaque_bounds() else { continue };
-        let file = format!("cels/{layer}-{frame}.png");
-        entries.push((file.clone(), png_io::encode_rgba(&img.crop(rect))?, CompressionMethod::Stored));
-        cels.push(CelEntry { layer, frame, x: rect.x, y: rect.y, width: rect.width, height: rect.height, file });
+    let mut artboards = Vec::new();
+    for artboard in project.artboards() {
+        let doc = artboard.document();
+        let mut cels = Vec::new();
+        for (layer, frame, img) in doc.cels() {
+            let Some(rect) = img.opaque_bounds() else { continue };
+            let file = format!("artboards/{}/cels/{layer}-{frame}.png", artboard.id());
+            entries.push((file.clone(), png_io::encode_rgba(&img.crop(rect))?, CompressionMethod::Stored));
+            cels.push(CelEntry { layer, frame, x: rect.x, y: rect.y, width: rect.width, height: rect.height, file });
+        }
+        artboards.push(ArtboardFile {
+            id: artboard.id(),
+            folder: artboard.folder(),
+            name: doc.name.clone(),
+            width: doc.width,
+            height: doc.height,
+            layers: doc.layers.clone(),
+            frames: doc.frames.clone(),
+            cels,
+            tags: doc.tags.clone(),
+            export: doc.export.clone(),
+            next_id: doc.next_id,
+            extensions: doc.extensions.clone(),
+        });
     }
-    let file = DocumentFile {
-        name: doc.name.clone(),
-        width: doc.width,
-        height: doc.height,
-        layers: doc.layers.clone(),
-        frames: doc.frames.clone(),
-        cels,
-        palette: doc.palette.clone(),
-        tags: doc.tags.clone(),
-        export: doc.export.clone(),
-        next_id: doc.next_id,
-        extensions: doc.extensions.clone(),
+    let file = ProjectFile {
+        name: project.name.clone(),
+        palette: project.palette.clone(),
+        folders: project.folders.clone(),
+        artboards,
+        next_id: project.next_id,
+        extensions: project.extensions.clone(),
     };
     let json = serde_json::to_vec_pretty(&file).map_err(|e| corrupt(e.to_string()))?;
     entries.insert(0, ("document.json".into(), json, CompressionMethod::Deflated));
     if opts.thumbnail {
+        let doc = project.artboards()[0].document();
         let thumb = composite_frame(doc, doc.frames[0].id)?;
         entries.push(("thumbnail.png".into(), png_io::encode_rgba(&thumb)?, CompressionMethod::Stored));
     }
@@ -199,7 +231,7 @@ fn read_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str, limit: u64) -
 }
 
 /// Parse a `.dotify` archive.
-pub fn read<R: Read + Seek>(reader: R) -> Result<Document, FormatError> {
+pub fn read<R: Read + Seek>(reader: R) -> Result<Project, FormatError> {
     let mut zip = ZipArchive::new(reader).map_err(|e| FormatError::NotDotify(e.to_string()))?;
     if zip.len() > MAX_ENTRIES {
         return Err(corrupt("too many entries"));
@@ -241,60 +273,73 @@ pub fn read<R: Read + Seek>(reader: R) -> Result<Document, FormatError> {
     let json: serde_json::Value = serde_json::from_slice(&take(&mut verified, "document.json")?)
         .map_err(|e| corrupt(format!("document.json: {e}")))?;
     let json = migrate::migrate(json, manifest.format_version.min(FORMAT_VERSION))?;
-    let file: DocumentFile = serde_json::from_value(json).map_err(|e| corrupt(format!("document.json: {e}")))?;
-    crate::model::validate_canvas_size(file.width, file.height)?;
+    let file: ProjectFile = serde_json::from_value(json).map_err(|e| corrupt(format!("document.json: {e}")))?;
 
-    let mut cels = BTreeMap::new();
-    for cel in &file.cels {
-        let rect = Rect::new(cel.x, cel.y, cel.width, cel.height);
-        if cel.width == 0 || cel.height == 0 || rect.right() > file.width || rect.bottom() > file.height {
-            return Err(corrupt(format!("cel {} is outside the canvas", cel.file)));
+    let mut artboards = Vec::with_capacity(file.artboards.len());
+    for artboard in file.artboards {
+        crate::model::validate_canvas_size(artboard.width, artboard.height)?;
+        let mut cels = BTreeMap::new();
+        for cel in &artboard.cels {
+            let rect = Rect::new(cel.x, cel.y, cel.width, cel.height);
+            if cel.width == 0 || cel.height == 0 || rect.right() > artboard.width || rect.bottom() > artboard.height {
+                return Err(corrupt(format!("cel {} is outside the canvas", cel.file)));
+            }
+            let img = png_io::decode_rgba(&take(&mut verified, &cel.file)?, MAX_CANVAS_SIZE)?;
+            if img.width() != cel.width || img.height() != cel.height {
+                return Err(corrupt(format!("cel {} has unexpected dimensions", cel.file)));
+            }
+            let mut full = Image::new(artboard.width, artboard.height);
+            full.write_region(rect, img.data());
+            if cels.insert((cel.layer, cel.frame), full).is_some() {
+                return Err(corrupt(format!("duplicate cel for layer {} frame {}", cel.layer, cel.frame)));
+            }
         }
-        let img = png_io::decode_rgba(&take(&mut verified, &cel.file)?, MAX_CANVAS_SIZE)?;
-        if img.width() != cel.width || img.height() != cel.height {
-            return Err(corrupt(format!("cel {} has unexpected dimensions", cel.file)));
+        let document = DocumentParts {
+            name: artboard.name,
+            width: artboard.width,
+            height: artboard.height,
+            layers: artboard.layers,
+            frames: artboard.frames,
+            cels,
+            palette: file.palette.clone(),
+            tags: artboard.tags,
+            export: artboard.export,
+            next_id: artboard.next_id,
+            extensions: artboard.extensions,
         }
-        let mut full = Image::new(file.width, file.height);
-        full.write_region(rect, img.data());
-        if cels.insert((cel.layer, cel.frame), full).is_some() {
-            return Err(corrupt(format!("duplicate cel for layer {} frame {}", cel.layer, cel.frame)));
-        }
+        .build()?;
+        artboards.push((artboard.id, artboard.folder, document));
     }
 
-    Ok(DocumentParts {
+    Ok(ProjectParts {
         name: file.name,
-        width: file.width,
-        height: file.height,
-        layers: file.layers,
-        frames: file.frames,
-        cels,
         palette: file.palette,
-        tags: file.tags,
-        export: file.export,
+        folders: file.folders,
+        artboards,
         next_id: file.next_id,
         extensions: file.extensions,
     }
     .build()?)
 }
 
-pub fn to_bytes(doc: &Document, opts: WriteOptions) -> Result<Vec<u8>, FormatError> {
+pub fn to_bytes(project: &Project, opts: WriteOptions) -> Result<Vec<u8>, FormatError> {
     let mut cursor = Cursor::new(Vec::new());
-    write(doc, &mut cursor, opts)?;
+    write(project, &mut cursor, opts)?;
     Ok(cursor.into_inner())
 }
 
-pub fn from_bytes(bytes: &[u8]) -> Result<Document, FormatError> {
+pub fn from_bytes(bytes: &[u8]) -> Result<Project, FormatError> {
     read(Cursor::new(bytes))
 }
 
-/// Write `doc` to `path` atomically: serialize to a temporary sibling file,
+/// Write `project` to `path` atomically: serialize to a temporary sibling file,
 /// fsync it and rename it over the destination.
-pub fn save(doc: &Document, path: &Path, opts: WriteOptions) -> Result<(), FormatError> {
+pub fn save(project: &Project, path: &Path, opts: WriteOptions) -> Result<(), FormatError> {
     let tmp = temp_path(path);
     let result = (|| {
         let file = File::create(&tmp)?;
         let mut w = BufWriter::new(file);
-        write(doc, &mut w, opts)?;
+        write(project, &mut w, opts)?;
         let file = w.into_inner().map_err(|e| e.into_error())?;
         file.sync_all()?;
         std::fs::rename(&tmp, path)?;
@@ -312,7 +357,7 @@ pub fn save(doc: &Document, path: &Path, opts: WriteOptions) -> Result<(), Forma
     result
 }
 
-pub fn load(path: &Path) -> Result<Document, FormatError> {
+pub fn load(path: &Path) -> Result<Project, FormatError> {
     read(std::io::BufReader::new(File::open(path)?))
 }
 
@@ -326,41 +371,101 @@ mod tests {
     use super::*;
     use crate::color::Rgba;
     use crate::command::{Command, PixelWrite};
-    use crate::Editor;
+    use crate::project::{ProjectCommand, ProjectCreated, ProjectEditor};
 
-    fn sample() -> Document {
-        let doc = Document::new("Sample", 16, 12).unwrap();
+    /// Two artboards (one in a folder), a shared palette, layers, frames.
+    fn sample() -> Project {
+        let project = Project::new("Sample", 16, 12).unwrap();
+        let a = project.artboards()[0].id();
+        let doc = project.document(a).unwrap();
         let (l, f) = (doc.layers()[0].id, doc.frames()[0].id);
-        let mut e = Editor::new(doc);
-        e.execute(Command::SetPixels {
+        let mut e = ProjectEditor::new(project);
+        let edit = |command| ProjectCommand::Edit { artboard: a, command };
+        e.execute(edit(Command::SetPixels {
             layer: l,
             frame: f,
             pixels: vec![
                 PixelWrite { x: 3, y: 4, color: Rgba::new(10, 20, 30, 40) },
                 PixelWrite { x: 15, y: 11, color: Rgba::WHITE },
             ],
-        })
+        }))
         .unwrap();
-        e.execute(Command::CreateLayer { name: Some("Empty".into()), index: None }).unwrap();
-        e.execute(Command::DuplicateFrame { frame: f }).unwrap();
-        e.execute(Command::UpdateLayer {
+        e.execute(edit(Command::CreateLayer { name: Some("Empty".into()), index: None })).unwrap();
+        e.execute(edit(Command::DuplicateFrame { frame: f })).unwrap();
+        e.execute(edit(Command::UpdateLayer {
             layer: l,
             name: None,
             visible: Some(false),
             locked: Some(true),
             opacity: Some(77),
+        }))
+        .unwrap();
+        let out = e.execute(ProjectCommand::CreateFolder { name: Some("Tiles".into()), index: None }).unwrap();
+        let ProjectCreated::Folder(folder) = out.created[0] else { panic!() };
+        let out = e
+            .execute(ProjectCommand::CreateArtboard {
+                name: Some("Grass".into()),
+                width: 8,
+                height: 8,
+                folder: Some(folder),
+                index: None,
+            })
+            .unwrap();
+        let ProjectCreated::Artboard(grass) = out.created[0] else { panic!() };
+        let gdoc = e.project().document(grass).unwrap();
+        let (gl, gf) = (gdoc.layers()[0].id, gdoc.frames()[0].id);
+        e.execute(ProjectCommand::Edit {
+            artboard: grass,
+            command: Command::FillRegion {
+                layer: gl,
+                frame: gf,
+                x: 0,
+                y: 0,
+                color: Rgba::opaque(0, 200, 0),
+                contiguous: true,
+            },
         })
         .unwrap();
-        e.document().clone()
+        e.execute(ProjectCommand::SetPalette {
+            palette: Palette { name: "Game".into(), colors: vec![Rgba::BLACK, Rgba::opaque(0, 200, 0)] },
+        })
+        .unwrap();
+        e.project().clone()
     }
 
     #[test]
     fn round_trip_is_lossless() {
-        let doc = sample();
-        let bytes = to_bytes(&doc, WriteOptions::default()).unwrap();
+        let project = sample();
+        let bytes = to_bytes(&project, WriteOptions::default()).unwrap();
         let back = from_bytes(&bytes).unwrap();
-        assert_eq!(back, doc);
-        assert_eq!(back.next_id, doc.next_id);
+        assert_eq!(back, project);
+        assert_eq!(back.next_id, project.next_id);
+        assert_eq!(back.artboards()[1].document().palette(), project.palette());
+    }
+
+    #[test]
+    fn opens_v1_fixture_as_single_artboard_project() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v1-hero.dotify");
+        let project = load(&path).unwrap();
+        assert_eq!(project.name(), "Hero");
+        assert_eq!(project.palette().name, "Mini");
+        assert!(project.folders().is_empty());
+        let [artboard] = project.artboards() else { panic!("expected one artboard") };
+        assert_eq!((artboard.id(), artboard.folder(), artboard.name()), (ArtboardId(1), None, "Hero"));
+        let doc = artboard.document();
+        assert_eq!((doc.width(), doc.height(), doc.palette()), (8, 6, project.palette()));
+        assert_eq!(
+            doc.layers().iter().map(|l| (l.id.0, l.name.as_str())).collect::<Vec<_>>(),
+            [(1, "Layer 1"), (3, "Ink")]
+        );
+        assert_eq!(doc.frames().iter().map(|f| (f.id.0, f.duration_ms)).collect::<Vec<_>>(), [(2, 100), (4, 150)]);
+        assert_eq!(doc.cel_image(LayerId(1), FrameId(4)).get(2, 2), Rgba::opaque(255, 0, 0));
+        assert_eq!(doc.cel_image(LayerId(1), FrameId(4)).get(0, 0), Rgba::TRANSPARENT);
+        assert_eq!(doc.cel_image(LayerId(3), FrameId(2)).get(7, 5), Rgba::new(0, 255, 0, 128));
+        assert_eq!(doc.next_id, 5);
+        // Re-saving writes v2 and stays lossless.
+        let back = from_bytes(&to_bytes(&project, WriteOptions::default()).unwrap()).unwrap();
+        assert_eq!(back, project);
     }
 
     #[test]
@@ -369,9 +474,11 @@ mod tests {
         let mut zip = ZipArchive::new(Cursor::new(&bytes)).unwrap();
         let json: serde_json::Value =
             serde_json::from_slice(&read_entry(&mut zip, "document.json", MAX_JSON_BYTES).unwrap()).unwrap();
-        let cel = &json["cels"][0];
+        let cel = &json["artboards"][0]["cels"][0];
+        assert_eq!(cel["file"], "artboards/1/cels/1-2.png");
         assert_eq!((cel["x"].as_u64(), cel["width"].as_u64(), cel["height"].as_u64()), (Some(3), Some(13), Some(8)));
-        assert_eq!(json["cels"].as_array().unwrap().len(), 2, "empty layer stores no cels");
+        assert_eq!(json["artboards"][0]["cels"].as_array().unwrap().len(), 2, "empty layer stores no cels");
+        assert!(json["artboards"][0].get("palette").is_none(), "the palette is stored once per project");
     }
 
     #[test]
@@ -415,7 +522,7 @@ mod tests {
     #[test]
     fn detects_missing_cel() {
         let bytes = to_bytes(&sample(), WriteOptions::default()).unwrap();
-        let broken = rewrite(&bytes, |name, data| (!name.starts_with("cels/")).then_some(data));
+        let broken = rewrite(&bytes, |name, data| (!name.starts_with("artboards/1/cels/")).then_some(data));
         assert!(matches!(from_bytes(&broken), Err(FormatError::Corrupt(_))));
     }
 

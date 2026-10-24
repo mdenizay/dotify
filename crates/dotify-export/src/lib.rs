@@ -1,6 +1,8 @@
 //! Exporters for Dotify documents. All scaling is integer nearest-neighbour
 //! and transparent pixels are preserved exactly.
 
+pub mod project;
+
 use std::path::Path;
 
 use dotify_core::composite::composite_frame;

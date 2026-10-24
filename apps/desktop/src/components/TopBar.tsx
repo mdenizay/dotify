@@ -1,5 +1,9 @@
 import {
   Download,
+  FolderDown,
+  LayoutGrid,
+  PanelLeft,
+  PenLine,
   FlipHorizontal2,
   FlipVertical2,
   Grid3x3,
@@ -16,6 +20,9 @@ import { Divider, IconButton } from "./ui/primitives";
 
 export function TopBar() {
   const fileName = useEditor((s) => s.session?.file_name ?? "");
+  const artboardName = useEditor((s) => s.session?.summary.name ?? "");
+  const mode = useEditor((s) => s.mode);
+  const libraryOpen = useEditor((s) => s.libraryOpen);
   const dirty = useEditor((s) => s.session?.summary.dirty ?? false);
   const canUndo = useEditor((s) => s.session?.summary.can_undo ?? false);
   const canRedo = useEditor((s) => s.session?.summary.can_redo ?? false);
@@ -33,51 +40,100 @@ export function TopBar() {
       className="flex h-[38px] shrink-0 items-center gap-1 border-b border-line bg-panel pr-2 pl-[84px]"
     >
       <div data-tauri-drag-region className="flex min-w-0 items-center gap-1.5 pr-2">
-        <span data-tauri-drag-region className="truncate text-[12px] font-medium">
+        <IconButton
+          label={libraryOpen ? "Hide library" : "Show library"}
+          shortcut="⇧⌘L"
+          active={libraryOpen}
+          onClick={() => setEditor({ libraryOpen: !libraryOpen })}
+        >
+          <PanelLeft size={15} strokeWidth={1.75} />
+        </IconButton>
+        <span data-tauri-drag-region className="truncate pl-1 text-[12px] font-medium">
           {fileName}
         </span>
         {dirty && (
           <span title="Unsaved changes" className="h-1.5 w-1.5 shrink-0 rounded-full bg-dim" />
         )}
+        {mode === "editor" && (
+          <span data-tauri-drag-region className="truncate text-[12px] text-dim">
+            / {artboardName}
+          </span>
+        )}
       </div>
       <Divider />
-      <ToolOptions />
-      <div data-tauri-drag-region className="h-full flex-1" />
-      <IconButton
-        label="Horizontal symmetry"
-        active={symX}
-        onClick={() => setEditor({ symmetryX: !symX })}
-      >
-        <FlipHorizontal2 size={15} strokeWidth={1.75} />
-      </IconButton>
-      <IconButton
-        label="Vertical symmetry"
-        active={symY}
-        onClick={() => setEditor({ symmetryY: !symY })}
-      >
-        <FlipVertical2 size={15} strokeWidth={1.75} />
-      </IconButton>
-      <IconButton
-        label="Pixel grid"
-        shortcut="⌘'"
-        active={showGrid}
-        onClick={() => setEditor({ showGrid: !showGrid })}
-      >
-        <Grid3x3 size={15} strokeWidth={1.75} />
-      </IconButton>
+      <div role="group" aria-label="View" className="flex items-center gap-0.5">
+        <IconButton
+          label="Edit artboard"
+          active={mode === "editor"}
+          onClick={() => controller.setMode("editor")}
+        >
+          <PenLine size={14} strokeWidth={1.75} />
+        </IconButton>
+        <IconButton
+          label="Artboard overview"
+          shortcut="⇧⌘O"
+          active={mode === "overview"}
+          onClick={() => controller.setMode("overview")}
+        >
+          <LayoutGrid size={14} strokeWidth={1.75} />
+        </IconButton>
+      </div>
       <Divider />
-      <IconButton label="Zoom out" shortcut="⌘−" onClick={() => controller.view?.zoomStep(-1)}>
+      {mode === "editor" ? (
+        <ToolOptions />
+      ) : (
+        <span className="pl-2 text-faint">
+          Click to select · double-click to edit · drag to pan
+        </span>
+      )}
+      <div data-tauri-drag-region className="h-full flex-1" />
+      {mode === "editor" && (
+        <>
+          <IconButton
+            label="Horizontal symmetry"
+            active={symX}
+            onClick={() => setEditor({ symmetryX: !symX })}
+          >
+            <FlipHorizontal2 size={15} strokeWidth={1.75} />
+          </IconButton>
+          <IconButton
+            label="Vertical symmetry"
+            active={symY}
+            onClick={() => setEditor({ symmetryY: !symY })}
+          >
+            <FlipVertical2 size={15} strokeWidth={1.75} />
+          </IconButton>
+          <IconButton
+            label="Pixel grid"
+            shortcut="⌘'"
+            active={showGrid}
+            onClick={() => setEditor({ showGrid: !showGrid })}
+          >
+            <Grid3x3 size={15} strokeWidth={1.75} />
+          </IconButton>
+          <Divider />
+        </>
+      )}
+      <IconButton
+        label="Zoom out"
+        shortcut="⌘−"
+        onClick={() => controller.activeView()?.zoomStep(-1)}
+      >
         <Minus size={14} />
       </IconButton>
       <button
         type="button"
         title="Fit to window (⌘0)"
-        onClick={() => controller.view?.fitToWindow()}
+        onClick={() => controller.activeView()?.fitToWindow()}
         className="h-6 w-12 rounded-[5px] text-center font-mono text-[11px] text-dim tabular-nums hover:bg-hover hover:text-fg"
       >
-        {zoom * 100}%
+        {mode === "editor" ? `${zoom * 100}%` : "Fit"}
       </button>
-      <IconButton label="Zoom in" shortcut="⌘=" onClick={() => controller.view?.zoomStep(1)}>
+      <IconButton
+        label="Zoom in"
+        shortcut="⌘="
+        onClick={() => controller.activeView()?.zoomStep(1)}
+      >
         <Plus size={14} />
       </IconButton>
       <Divider />
@@ -100,6 +156,13 @@ export function TopBar() {
       <Divider />
       <IconButton label="Export PNG" shortcut="⌘E" onClick={() => setEditor({ exportOpen: true })}>
         <Download size={15} strokeWidth={1.75} />
+      </IconButton>
+      <IconButton
+        label="Export all artboards"
+        shortcut="⇧⌘E"
+        onClick={() => setEditor({ exportAllOpen: true })}
+      >
+        <FolderDown size={15} strokeWidth={1.75} />
       </IconButton>
       <IconButton
         label={theme === "dark" ? "Light theme" : "Dark theme"}

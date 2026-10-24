@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Project library: one `.dotify` project now holds many artboards (sprites), each with its own size, layers, frames and tags, sharing one palette
+- Library sidebar with thumbnails, folders, search, drag and drop and a context menu (rename, duplicate, move, delete)
+- Artboard overview: all artboards side by side with pan and zoom; double-click one to edit it
+- Export all artboards as PNG in one go, with one sub-folder per library folder (also `dotify export-all`)
+- `.dotify` format version 2; version 1 files open as a project with one artboard
+
 ## 0.1.1
 
 - Fix the canvas background and checkerboard keeping the old colors after switching between light and dark themes

@@ -39,6 +39,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item(app, "save_as", "Save As…", Some("CmdOrCtrl+Shift+S"))?)
         .separator()
         .item(&item(app, "export_png", "Export PNG…", Some("CmdOrCtrl+E"))?)
+        .item(&item(app, "export_all", "Export All Artboards…", Some("CmdOrCtrl+Shift+E"))?)
         .separator()
         .item(&item(app, "close", "Close Window", Some("CmdOrCtrl+W"))?)
         .build()?;
@@ -58,6 +59,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item(app, "zoom_out", "Zoom Out", Some("CmdOrCtrl+-"))?)
         .item(&item(app, "zoom_actual", "Actual Size", Some("CmdOrCtrl+1"))?)
         .item(&item(app, "zoom_fit", "Fit to Window", Some("CmdOrCtrl+0"))?)
+        .separator()
+        .item(&item(app, "toggle_overview", "Artboard Overview", Some("CmdOrCtrl+Shift+O"))?)
+        .item(&item(app, "toggle_library", "Show Library", Some("CmdOrCtrl+Shift+L"))?)
         .separator()
         .item(&item(app, "toggle_grid", "Show Pixel Grid", Some("CmdOrCtrl+'"))?)
         .item(&item(app, "toggle_theme", "Toggle Light/Dark", None)?)

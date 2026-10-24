@@ -1,4 +1,4 @@
-import { getEditor, setEditor, type ToolId } from "../state/editor";
+import { dialogOpen, getEditor, setEditor, type ToolId } from "../state/editor";
 import { controller, isTyping } from "./controller";
 
 const TOOL_KEYS: Record<string, ToolId> = {
@@ -24,7 +24,7 @@ export function installShortcuts(): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || isTyping() || e.repeat) return;
     const s = getEditor();
-    if (s.newDocOpen || s.exportOpen || s.recovery) return;
+    if (dialogOpen(s) || s.mode !== "editor") return;
     const key = e.key.toLowerCase();
     const tool = TOOL_KEYS[key];
     if (tool && !e.altKey) {

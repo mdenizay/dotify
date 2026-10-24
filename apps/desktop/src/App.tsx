@@ -3,9 +3,16 @@ import { controller } from "./app/controller";
 import { installShortcuts } from "./app/shortcuts";
 import { scheduleUpdateChecks } from "./app/updates";
 import { CanvasView } from "./canvas/CanvasView";
+import { OverviewView } from "./canvas/OverviewView";
 import { ColorPicker } from "./components/ColorPicker";
-import { ExportDialog, NewDocumentDialog, RecoveryDialog } from "./components/Dialogs";
+import {
+  ExportDialog,
+  NewArtboardDialog,
+  NewDocumentDialog,
+  RecoveryDialog,
+} from "./components/Dialogs";
 import { LayerActions, LayersPanel } from "./components/LayersPanel";
+import { LibraryPanel } from "./components/LibraryPanel";
 import { PaletteActions, PalettePanel } from "./components/PalettePanel";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
@@ -25,7 +32,24 @@ function CanvasHost() {
       view.dispose();
     };
   }, []);
-  return <div ref={ref} className="relative min-w-0 flex-1 bg-workspace" />;
+  return <div ref={ref} className="relative min-h-0 min-w-0 flex-1 bg-workspace" />;
+}
+
+function OverviewHost() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const view = new OverviewView(ref.current!, {
+      images: controller.images,
+      select: (id) => void controller.selectArtboard(id),
+      open: (id) => void controller.selectArtboard(id, true),
+    });
+    controller.overview = view;
+    return () => {
+      controller.overview = null;
+      view.dispose();
+    };
+  }, []);
+  return <div ref={ref} className="relative min-h-0 min-w-0 flex-1 bg-workspace" />;
 }
 
 function RightPanel() {
@@ -84,6 +108,8 @@ function RightPanel() {
 
 export function App() {
   const ready = useEditor((s) => s.session !== null);
+  const overview = useEditor((s) => s.mode === "overview");
+  const libraryOpen = useEditor((s) => s.libraryOpen);
   const [fatal, setFatal] = useState<string | null>(null);
 
   useEffect(() => {
@@ -108,17 +134,24 @@ export function App() {
     <div className="flex h-full flex-col">
       <TopBar />
       <div className="flex min-h-0 flex-1">
-        <Toolbar />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <CanvasHost />
-          <Timeline />
+        {libraryOpen && <LibraryPanel />}
+        <div className={overview ? "flex min-w-0 flex-1" : "hidden"}>
+          <OverviewHost />
         </div>
-        <RightPanel />
+        <div className={overview ? "hidden" : "flex min-w-0 flex-1"}>
+          <Toolbar />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <CanvasHost />
+            <Timeline />
+          </div>
+          <RightPanel />
+        </div>
       </div>
       <StatusBar />
       {ready && (
         <>
           <NewDocumentDialog />
+          <NewArtboardDialog />
           <ExportDialog />
           <RecoveryDialog />
         </>

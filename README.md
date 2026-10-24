@@ -22,10 +22,14 @@ through the same command engine you use by hand.
   opacity
 - Frames: add, duplicate, delete, reorder, per-frame duration (playback
   arrives in Phase 2)
+- Project library: many artboards (sprites) per project, each with its own
+  size, layers and frames, sharing one palette; folders, search, drag and
+  drop, and an overview of all artboards side by side
 - Undo/redo of every edit, with labels
 - Native `.dotify` project format (versioned ZIP, lossless, checksummed),
   atomic saves, autosave with crash recovery
-- PNG export at 1×–16× with nearest-neighbour scaling
+- PNG export at 1×–16× with nearest-neighbour scaling, for one artboard or
+  all of them at once
 - `dotify` CLI for headless editing and export
 
 ## Install
@@ -90,8 +94,15 @@ echo '[{"type":"draw_rectangle","layer":1,"frame":2,"x":4,"y":4,"width":8,"heigh
 cargo run -p dotify-cli -- export-png hero.dotify hero.png --scale 8
 ```
 
-`apply` takes the same JSON commands as the desktop app (see
-`crates/dotify-core/src/command.rs`); an array is applied atomically.
+```bash
+cargo run -p dotify-cli -- export-all hero.dotify out/ --scale 4
+```
+
+`apply` takes the same JSON commands as the desktop app: project commands
+(`create_artboard`, `create_folder`, `edit`, … in
+`crates/dotify-core/src/project/command.rs`) and document commands (in
+`crates/dotify-core/src/command.rs`), which apply to `--artboard` (default:
+the first artboard). An array is applied atomically.
 
 ## Keyboard shortcuts
 

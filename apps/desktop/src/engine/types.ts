@@ -1,11 +1,14 @@
 // TypeScript mirrors of the Rust engine types. Keep in sync with
-// crates/dotify-core/src/{command,editor,model}.rs and
+// crates/dotify-core/src/{command,editor,model}.rs,
+// crates/dotify-core/src/project/{command,editor,mod}.rs and
 // apps/desktop/src-tauri/src/{commands,session}.rs.
 
 /** `#rrggbbaa`, straight alpha. */
 export type Hex = string;
 export type LayerId = number;
 export type FrameId = number;
+export type ArtboardId = number;
+export type FolderId = number;
 
 export interface Point {
   x: number;
@@ -64,7 +67,42 @@ export interface DocumentSummary {
   redo_label: string | null;
 }
 
+export interface Folder {
+  id: FolderId;
+  name: string;
+}
+
+/** Library entry of one artboard (no pixel data). */
+export interface ArtboardSummary {
+  id: ArtboardId;
+  name: string;
+  /** `null` = not in any folder. */
+  folder: FolderId | null;
+  width: number;
+  height: number;
+  layers: Layer[];
+  frames: Frame[];
+  tags: AnimationTag[];
+}
+
+export interface ProjectSummary {
+  name: string;
+  palette: Palette;
+  folders: Folder[];
+  /** Library order. */
+  artboards: ArtboardSummary[];
+  revision: number;
+  dirty: boolean;
+  can_undo: boolean;
+  can_redo: boolean;
+  undo_label: string | null;
+  redo_label: string | null;
+}
+
 export interface SessionView {
+  project: ProjectSummary;
+  active_artboard: ArtboardId;
+  /** The active artboard, with the project's history state. */
   summary: DocumentSummary;
   path: string | null;
   file_name: string;
@@ -108,9 +146,32 @@ export type Command =
   | { type: "rename_document"; name: string }
   | { type: "batch"; label?: string | null; commands: Command[] };
 
-export type Created = { layer: LayerId } | { frame: FrameId };
+export type ProjectCommand =
+  | {
+      type: "create_artboard";
+      name?: string | null;
+      width: number;
+      height: number;
+      folder?: FolderId | null;
+      index?: number | null;
+    }
+  | { type: "rename_artboard"; artboard: ArtboardId; name: string }
+  | { type: "duplicate_artboard"; artboard: ArtboardId }
+  | { type: "delete_artboard"; artboard: ArtboardId }
+  | { type: "move_artboard"; artboard: ArtboardId; index: number; folder: FolderId | null }
+  | { type: "create_folder"; name?: string | null; index?: number | null }
+  | { type: "rename_folder"; folder: FolderId; name: string }
+  | { type: "delete_folder"; folder: FolderId }
+  | { type: "set_palette"; palette: Palette }
+  | { type: "rename_project"; name: string }
+  | { type: "edit"; artboard: ArtboardId; command: Command }
+  | { type: "batch"; label?: string | null; commands: ProjectCommand[] };
+
+export type Created =
+  { layer: LayerId } | { frame: FrameId } | { artboard: ArtboardId } | { folder: FolderId };
 
 export interface DirtyRegion {
+  artboard: ArtboardId;
   layer: LayerId;
   frame: FrameId;
   rect: Rect;
@@ -121,8 +182,15 @@ export interface Outcome {
   changed: boolean;
   structure_changed: boolean;
   dirty: DirtyRegion[];
+  /** Artboards whose content changed. */
+  artboards: ArtboardId[];
   created: Created[];
   label: string | null;
+}
+
+export interface ExportAllResult {
+  dir: string;
+  files: number;
 }
 
 export interface RecoveryInfo {

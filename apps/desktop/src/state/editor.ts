@@ -1,6 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import type {
+  ArtboardSummary,
+  Folder,
   Frame,
   FrameId,
   Hex,
@@ -15,6 +17,9 @@ export type ToolId =
 
 export type Theme = "dark" | "light";
 
+/** `editor` edits the active artboard; `overview` shows all artboards. */
+export type Mode = "editor" | "overview";
+
 interface Prefs {
   theme: Theme;
   showGrid: boolean;
@@ -26,10 +31,14 @@ interface Prefs {
   rightPanelWidth: number;
   timelineOpen: boolean;
   exportScale: number;
+  libraryOpen: boolean;
+  libraryWidth: number;
 }
 
 export interface EditorState extends Prefs {
   session: SessionView | null;
+  mode: Mode;
+  librarySearch: string;
   activeLayerId: LayerId | null;
   activeFrameId: FrameId | null;
   tool: ToolId;
@@ -42,7 +51,9 @@ export interface EditorState extends Prefs {
   opacityPreview: { layer: LayerId; value: number } | null;
   toast: { message: string; kind: "info" | "error" } | null;
   newDocOpen: boolean;
+  newArtboardOpen: boolean;
   exportOpen: boolean;
+  exportAllOpen: boolean;
   recovery: RecoveryInfo | null;
 }
 
@@ -59,6 +70,8 @@ const defaults: Prefs = {
   rightPanelWidth: 264,
   timelineOpen: true,
   exportScale: 1,
+  libraryOpen: true,
+  libraryWidth: 232,
 };
 
 function loadPrefs(): Prefs {
@@ -73,6 +86,8 @@ function loadPrefs(): Prefs {
 export const useEditor = create<EditorState>()(() => ({
   ...loadPrefs(),
   session: null,
+  mode: "editor",
+  librarySearch: "",
   activeLayerId: null,
   activeFrameId: null,
   tool: "pencil",
@@ -83,7 +98,9 @@ export const useEditor = create<EditorState>()(() => ({
   opacityPreview: null,
   toast: null,
   newDocOpen: false,
+  newArtboardOpen: false,
   exportOpen: false,
+  exportAllOpen: false,
   recovery: null,
 }));
 
@@ -130,6 +147,15 @@ export function toast(message: string, kind: "info" | "error" = "info") {
 
 const NO_LAYERS: Layer[] = [];
 const NO_FRAMES: Frame[] = [];
+const NO_ARTBOARDS: ArtboardSummary[] = [];
+const NO_FOLDERS: Folder[] = [];
+export const selectArtboards = (s: EditorState) => s.session?.project.artboards ?? NO_ARTBOARDS;
+export const selectFolders = (s: EditorState) => s.session?.project.folders ?? NO_FOLDERS;
+export const selectActiveArtboard = (s: EditorState) => s.session?.active_artboard ?? null;
+
+/** True while a modal dialog is open (single-key shortcuts are disabled). */
+export const dialogOpen = (s: EditorState) =>
+  s.newDocOpen || s.newArtboardOpen || s.exportOpen || s.exportAllOpen || s.recovery !== null;
 export const selectLayers = (s: EditorState) => s.session?.summary.layers ?? NO_LAYERS;
 export const selectFrames = (s: EditorState) => s.session?.summary.frames ?? NO_FRAMES;
 

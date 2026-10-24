@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  Command,
+  ArtboardId,
   EngineError,
+  ExportAllResult,
   FrameId,
   LayerId,
   Outcome,
+  ProjectCommand,
   Rect,
   RecoveryInfo,
   SessionView,
@@ -18,16 +20,33 @@ export const engine = {
   open: () => invoke<SessionView | null>("doc_open"),
   save: () => invoke<SessionView | null>("doc_save"),
   saveAs: () => invoke<SessionView | null>("doc_save_as"),
-  execute: (command: Command, expectedRevision?: number) =>
+  execute: (command: ProjectCommand, expectedRevision?: number) =>
     invoke<Outcome>("execute", { command, expectedRevision: expectedRevision ?? null }),
   undo: () => invoke<Outcome | null>("undo"),
   redo: () => invoke<Outcome | null>("redo"),
-  async readCel(layer: LayerId, frame: FrameId, rect?: Rect): Promise<Uint8ClampedArray> {
-    const buf = await invoke<ArrayBuffer>("read_cel", { layer, frame, rect: rect ?? null });
+  activate: (artboard: ArtboardId) => invoke<SessionView>("artboard_activate", { artboard }),
+  async readCel(
+    artboard: ArtboardId,
+    layer: LayerId,
+    frame: FrameId,
+    rect?: Rect,
+  ): Promise<Uint8ClampedArray> {
+    const buf = await invoke<ArrayBuffer>("read_cel", {
+      artboard,
+      layer,
+      frame,
+      rect: rect ?? null,
+    });
     return new Uint8ClampedArray(buf);
   },
-  exportPng: (frame: FrameId, scale: number) =>
-    invoke<string | null>("export_png", { frame, scale }),
+  /** Composited RGBA of an artboard frame (first frame by default). */
+  async composite(artboard: ArtboardId, frame?: FrameId): Promise<Uint8ClampedArray> {
+    const buf = await invoke<ArrayBuffer>("artboard_composite", { artboard, frame: frame ?? null });
+    return new Uint8ClampedArray(buf);
+  },
+  exportPng: (artboard: ArtboardId, frame: FrameId, scale: number) =>
+    invoke<string | null>("export_png", { artboard, frame, scale }),
+  exportAllPng: (scale: number) => invoke<ExportAllResult | null>("export_all_png", { scale }),
   recoveryStatus: () => invoke<RecoveryInfo | null>("recovery_status"),
   recoveryRestore: () => invoke<SessionView>("recovery_restore"),
   recoveryDiscard: () => invoke<null>("recovery_discard"),
