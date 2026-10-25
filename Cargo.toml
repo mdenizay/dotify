@@ -4,6 +4,7 @@ members = [
     "crates/dotify-core",
     "crates/dotify-export",
     "crates/dotify-cli",
+    "crates/dotify-mcp",
     "apps/desktop/src-tauri",
 ]
 

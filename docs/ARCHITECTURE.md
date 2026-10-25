@@ -33,7 +33,8 @@ dotify/
 │   │                           compositing, PNG codec, .dotify format
 │   ├── dotify-export/          PNG, spritesheet + JSON metadata, GIF, Godot 4,
 │   │                           batch export of all artboards
-│   └── dotify-cli/             Headless project manipulation and export
+│   ├── dotify-cli/             Headless project manipulation and export
+│   └── dotify-mcp/             MCP server (stdio + Streamable HTTP)
 ├── apps/desktop/               Tauri + React application
 │   ├── src/                    React/TypeScript UI
 │   │   ├── engine/             Typed bridge to the Rust engine (Tauri IPC)
@@ -46,14 +47,12 @@ dotify/
 └── .github/workflows/          CI
 ```
 
-Planned crates (not yet created, see roadmap): `dotify-mcp` (Phase 3).
-
 ## Layering
 
 ```
  ┌───────────────────────────────┐   ┌──────────────┐  ┌──────────────┐
  │ React panels (Zustand stores) │   │  dotify-cli  │  │  dotify-mcp  │
- ├───────────────────────────────┤   │              │  │  (Phase 3)   │
+ ├───────────────────────────────┤   │              │  │              │
  │ CanvasView / tools (plain TS) │   │              │  │              │
  ├───────────────────────────────┤   │              │  │              │
  │ engine bridge (invoke)        │   │              │  │              │
@@ -200,6 +199,32 @@ nearest-neighbour; nothing is resampled or quantized.
   goes through an `ArtboardExporter` (`PngArtboardExporter`,
   `GodotArtboardExporter`; new formats implement the trait).
 
+## dotify-mcp
+
+A Model Context Protocol server built on the official Rust SDK (`rmcp`). See
+[`MCP.md`](MCP.md) for setup and the tool list.
+
+- `tools.rs` – `Dotify`, the transport-independent tool set: open projects
+  (`Workspace`, handles `p1`, `p2`, …, each a `ProjectEditor` plus its file
+  path), argument parsing, artboard resolution (an omitted `artboard` means
+  the only one; with several it is an `artboard_required` error),
+  confirmation and overwrite checks, exports. Edit tools compile to one
+  `ProjectCommand` (`edit` for artboard commands) and run through
+  `ProjectEditor::execute_expecting`, so each call (or `batch`) is one
+  undoable transaction with an optional revision check.
+- `args.rs` – the tools' argument types with their JSON Schemas (schemars).
+  They mirror `Command` / `ProjectCommand` rather than adding schema derives
+  to the core; `EditOp::into_command` is the only mapping. `batch` takes a
+  list of `EditOp`s named like the single edit tools.
+- `sandbox.rs` – every path goes through `Sandbox`: canonicalized, required
+  to stay inside a `--root`, extension-checked.
+- `server.rs` – rmcp `ServerHandler`: lists tools (minus writing tools in
+  read-only mode), runs calls on the blocking pool and turns `ToolError`s
+  into `isError` results with a structured `{ error: { code, message } }`.
+- `http.rs` – Streamable HTTP under `/mcp` with bearer-token auth (optionally
+  `/mcp/<token>` for clients without custom headers) and rmcp's `Host`
+  allow-list.
+
 ## The `.dotify` format
 
 See [`FORMAT.md`](FORMAT.md) for the full specification. In short: a ZIP
@@ -287,6 +312,10 @@ renamed into place.
   per-frame palettes); a snapshot of the Godot `.tres`
   (`tests/snapshots/hero.tres`, refresh with `DOTIFY_UPDATE_SNAPSHOTS=1`).
 - `dotify-cli`: end-to-end run against a temp directory.
+- `dotify-mcp`: path sandboxing (traversal, symlinks), argument validation,
+  confirmations, read-only mode, every tool against a temp root, HTTP token
+  and host checks, and an end-to-end JSON-RPC session with the binary over
+  stdio.
 - Frontend: Vitest tests for rasterisers, view math, overview layout and
   library drag-and-drop targets.
 
@@ -295,8 +324,8 @@ renamed into place.
 | Phase | Scope |
 |-------|-------|
 | 1 | Tauri app, workspace, canvas, pencil/eraser/fill/line/rect/ellipse/eyedropper, zoom/pan, palette, layers, undo/redo, save/load, PNG export, autosave/recovery |
-| 2 (current) | Timeline playback, onion skinning, tags, live preview, GIF/spritesheet + JSON export, Godot 4 export |
-| 3 | `dotify-mcp` stdio server over the shared command engine; permissions, revision checks, confirmations |
+| 2 | Timeline playback, onion skinning, tags, live preview, GIF/spritesheet + JSON export, Godot 4 export |
+| 3 (current) | `dotify-mcp` server (stdio + Streamable HTTP) over the shared command engine; root sandboxing, token auth, revision checks, confirmations, read-only mode |
 | 4 | Built-in AI assistant, provider abstraction (pixel-command vs raster generation), keychain-stored keys, preview/approve/undo |
 | 5 | Selections and transforms, tilemaps, engine export presets, Windows/Linux |
 

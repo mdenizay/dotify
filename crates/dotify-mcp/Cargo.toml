@@ -1,0 +1,36 @@
+[package]
+name = "dotify-mcp"
+description = "Model Context Protocol server for Dotify projects (stdio and Streamable HTTP)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# rmcp needs a newer toolchain than the rest of the workspace.
+rust-version = "1.88"
+
+[[bin]]
+name = "dotify-mcp"
+path = "src/main.rs"
+
+[dependencies]
+dotify-core.workspace = true
+dotify-export.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rmcp = { version = "3.7", default-features = false, features = [
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
+schemars = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "io-std"] }
+tokio-util = "0.7"
+clap = { version = "4", features = ["derive", "env"] }
+base64 = "0.22"
+getrandom = "0.3"
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

@@ -38,6 +38,8 @@ through the same command engine you use by hand.
 - Godot 4 export: spritesheet PNG + `SpriteFrames` `.tres` with one
   animation per tag, ready for `AnimatedSprite2D`
 - `dotify` CLI for headless editing and export
+- `dotify-mcp` server so Claude, ChatGPT and other MCP clients can draw,
+  animate and export through the same undoable commands
 
 ## Install
 
@@ -47,7 +49,8 @@ With [Homebrew](https://brew.sh) (macOS 13+, Apple Silicon):
 brew install --cask mdenizay/tap/dotify
 ```
 
-The command-line tool is a separate formula:
+The command-line tools (`dotify` and the `dotify-mcp` server) are a separate
+formula:
 
 ```bash
 brew install mdenizay/tap/dotify-cli
@@ -61,7 +64,7 @@ app (`auto_updates true`), so `brew upgrade` won't fight it.
 
 ## Building from source
 
-Requirements: Rust (stable, ≥ 1.85), Node.js ≥ 20, pnpm 10, and Xcode
+Requirements: Rust (stable, ≥ 1.88), Node.js ≥ 20, pnpm 10, and Xcode
 command line tools on macOS.
 
 ```bash
@@ -145,6 +148,18 @@ together, or pass `--res-dir res://…` to write an absolute project path.
 Set *Texture ▸ Filter* to *Nearest* (or the project default) for crisp
 pixels.
 
+## AI assistants (MCP)
+
+`dotify-mcp` exposes projects to MCP clients, limited to the folders you
+allow. For Claude Code:
+
+```bash
+claude mcp add dotify --scope user -- dotify-mcp --root ~/Art
+```
+
+See [docs/MCP.md](docs/MCP.md) for Claude Desktop, ChatGPT developer mode
+(HTTP behind a tunnel, token-protected), the tool list and the safety rules.
+
 ## Keyboard shortcuts
 
 | Key | Action | Key | Action |
@@ -168,8 +183,9 @@ pixels.
 crates/dotify-core     document model, commands, undo/redo, compositing, .dotify format
 crates/dotify-export   PNG, spritesheet + JSON, GIF and Godot 4 export
 crates/dotify-cli      headless `dotify` binary
+crates/dotify-mcp      `dotify-mcp` Model Context Protocol server (stdio + HTTP)
 apps/desktop           Tauri + React app (src/ = UI, src-tauri/ = native shell)
-docs/                  ARCHITECTURE.md, FORMAT.md
+docs/                  ARCHITECTURE.md, FORMAT.md, MCP.md
 ```
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before contributing and
