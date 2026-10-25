@@ -88,6 +88,12 @@ export function Dialog({
   width?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers usually pass a fresh `onClose` on every render; keep the latest in
+  // a ref so the mount effect below runs once and never steals focus back.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     const el = ref.current;
     const first = el?.querySelector<HTMLElement>("input, button:not([data-dismiss])");
@@ -95,12 +101,12 @@ export function Dialog({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, []);
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[14vh]"
@@ -138,6 +144,12 @@ export function Button({
     />
   );
 }
+
+/**
+ * Spread onto free-text inputs: names and search should stay exactly as
+ * typed, without macOS auto-capitalizing or auto-correcting them.
+ */
+export const plainText = { autoCapitalize: "off", autoCorrect: "off", spellCheck: false } as const;
 
 export const inputClass =
   "h-7 w-full rounded-[5px] border border-line-strong bg-panel px-2 text-[12px] text-fg outline-none focus:border-accent";

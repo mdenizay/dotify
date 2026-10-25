@@ -3,7 +3,7 @@ import { controller } from "../app/controller";
 import { toRgbHex, uniqueTagName } from "../app/tags";
 import type { AnimationTag, Direction, FrameId } from "../engine/types";
 import { getEditor, selectFrames, selectTags, setEditor, useEditor } from "../state/editor";
-import { Button, Dialog, inputClass } from "./ui/primitives";
+import { Button, Dialog, inputClass, plainText } from "./ui/primitives";
 
 export function TagDialog() {
   const dialog = useEditor((s) => s.tagDialog);
@@ -90,7 +90,12 @@ function TagForm({ tag, from, to }: { tag?: AnimationTag; from: FrameId; to: Fra
         <div className="flex items-end gap-2">
           <label className="flex flex-1 flex-col gap-1 text-dim">
             Name
-            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              {...plainText}
+              className={inputClass}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
           <label className="flex flex-col gap-1 text-dim">
             Color

@@ -12,7 +12,7 @@ import {
   useEditor,
   type ExportKind,
 } from "../state/editor";
-import { Button, Dialog, inputClass } from "./ui/primitives";
+import { Button, Dialog, inputClass, plainText } from "./ui/primitives";
 
 const PRESETS = [16, 24, 32, 48, 64, 128, 256];
 const MAX = 4096;
@@ -107,6 +107,7 @@ function SpriteForm({
         <label className="flex flex-col gap-1 text-dim">
           Name
           <input
+            {...plainText}
             className={inputClass}
             value={name}
             placeholder={namePlaceholder}

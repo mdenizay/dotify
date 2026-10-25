@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Lock, LockOpen, Plus, Trash2 } f
 import { controller } from "../app/controller";
 import type { Layer, LayerId } from "../engine/types";
 import { activeLayer, selectLayers, setEditor, useEditor } from "../state/editor";
-import { IconButton, inputClass } from "./ui/primitives";
+import { IconButton, inputClass, plainText } from "./ui/primitives";
 
 export function LayerActions() {
   const layers = useEditor(selectLayers);
@@ -92,6 +92,7 @@ function LayerRow({ layer, active }: { layer: Layer; active: boolean }) {
       <LayerThumb id={layer.id} />
       {editing ? (
         <input
+          {...plainText}
           autoFocus
           aria-label="Layer name"
           defaultValue={layer.name}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { hsvaToRgba, normalizeHex, rgba, rgbaToHsva, toHex, type HSVA } from "../canvas/color";
 import { setEditor, useEditor } from "../state/editor";
-import { inputClass } from "./ui/primitives";
+import { inputClass, plainText } from "./ui/primitives";
 
 /** HSV picker bound to the primary color. Keeps hue stable for greys. */
 export function ColorPicker() {
@@ -66,10 +66,10 @@ export function ColorPicker() {
           <div className="h-full w-full rounded-[4px]" style={{ background: primary }} />
         </div>
         <input
+          {...plainText}
           aria-label="Hex color"
           className={`${inputClass} font-mono`}
           value={hexText}
-          spellCheck={false}
           onChange={(e) => setHexText(e.target.value)}
           onBlur={() => setHexText(primary)}
           onKeyDown={(e) => {

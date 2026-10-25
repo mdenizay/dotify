@@ -13,7 +13,7 @@ import {
   setEditor,
   useEditor,
 } from "../state/editor";
-import { IconButton, inputClass } from "./ui/primitives";
+import { IconButton, inputClass, plainText } from "./ui/primitives";
 
 const DRAG_TYPE = "application/x-dotify-artboard";
 
@@ -94,6 +94,7 @@ export function LibraryPanel() {
           className="pointer-events-none absolute top-[8px] left-[15px] text-faint"
         />
         <input
+          {...plainText}
           type="text"
           aria-label="Search artboards"
           placeholder="Search"
@@ -402,6 +403,7 @@ function RenameInput({
 }) {
   return (
     <input
+      {...plainText}
       autoFocus
       aria-label={label}
       defaultValue={value}
