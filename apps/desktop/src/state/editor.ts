@@ -3,6 +3,8 @@ import { create } from "zustand";
 import type { OnionSkin } from "../canvas/onion";
 import type { PlayMode } from "../canvas/playback";
 import type {
+  ArtboardSummary,
+  Folder,
   AnimationTag,
   Frame,
   FrameId,
@@ -19,6 +21,8 @@ export type ToolId =
 
 export type Theme = "dark" | "light";
 
+/** `editor` edits the active artboard; `overview` shows all artboards. */
+export type Mode = "editor" | "overview";
 export type ExportKind = "png" | "sheet" | "gif" | "godot";
 
 /** The tag dialog: creating over a frame range, or editing a tag by name. */
@@ -41,6 +45,8 @@ interface Prefs {
   timelineOpen: boolean;
   previewOpen: boolean;
   exportScale: number;
+  libraryOpen: boolean;
+  libraryWidth: number;
   exportKind: ExportKind;
   /** Spritesheet layout shared by the sheet and Godot exports (scale is `exportScale`). */
   exportSheet: Omit<SheetOptions, "scale">;
@@ -51,6 +57,8 @@ interface Prefs {
 
 export interface EditorState extends Prefs {
   session: SessionView | null;
+  mode: Mode;
+  librarySearch: string;
   activeLayerId: LayerId | null;
   activeFrameId: FrameId | null;
   tool: ToolId;
@@ -64,7 +72,9 @@ export interface EditorState extends Prefs {
   opacityPreview: { layer: LayerId; value: number } | null;
   toast: { message: string; kind: "info" | "error" } | null;
   newDocOpen: boolean;
+  newArtboardOpen: boolean;
   exportOpen: boolean;
+  exportAllOpen: boolean;
   recovery: RecoveryInfo | null;
   /** Timeline playback is running (the canvas shows composites, editing pauses it). */
   playing: boolean;
@@ -91,6 +101,8 @@ const defaults: Prefs = {
   timelineOpen: true,
   previewOpen: true,
   exportScale: 1,
+  libraryOpen: true,
+  libraryWidth: 232,
   exportKind: "png",
   exportSheet: { layout: "grid", columns: null, padding: 0, extrude: 0 },
   godotResDir: "",
@@ -110,6 +122,8 @@ function loadPrefs(): Prefs {
 export const useEditor = create<EditorState>()(() => ({
   ...loadPrefs(),
   session: null,
+  mode: "editor",
+  librarySearch: "",
   activeLayerId: null,
   activeFrameId: null,
   tool: "pencil",
@@ -121,7 +135,9 @@ export const useEditor = create<EditorState>()(() => ({
   opacityPreview: null,
   toast: null,
   newDocOpen: false,
+  newArtboardOpen: false,
   exportOpen: false,
+  exportAllOpen: false,
   recovery: null,
   playing: false,
   previewPlaying: true,
@@ -173,6 +189,20 @@ export function toast(message: string, kind: "info" | "error" = "info") {
 
 const NO_LAYERS: Layer[] = [];
 const NO_FRAMES: Frame[] = [];
+const NO_ARTBOARDS: ArtboardSummary[] = [];
+const NO_FOLDERS: Folder[] = [];
+export const selectArtboards = (s: EditorState) => s.session?.project.artboards ?? NO_ARTBOARDS;
+export const selectFolders = (s: EditorState) => s.session?.project.folders ?? NO_FOLDERS;
+export const selectActiveArtboard = (s: EditorState) => s.session?.active_artboard ?? null;
+
+/** True while a modal dialog is open (single-key shortcuts are disabled). */
+export const dialogOpen = (s: EditorState) =>
+  s.newDocOpen ||
+  s.newArtboardOpen ||
+  s.exportOpen ||
+  s.exportAllOpen ||
+  s.recovery !== null ||
+  s.tagDialog !== null;
 const NO_TAGS: AnimationTag[] = [];
 export const selectLayers = (s: EditorState) => s.session?.summary.layers ?? NO_LAYERS;
 export const selectFrames = (s: EditorState) => s.session?.summary.frames ?? NO_FRAMES;

@@ -1,13 +1,23 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message } from "@tauri-apps/plugin-dialog";
+import { ArtboardImages } from "../canvas/ArtboardImages";
 import { CelCache } from "../canvas/CelCache";
 import type { CanvasView } from "../canvas/CanvasView";
 import { FrameStore } from "../canvas/FrameStore";
+import type { OverviewView } from "../canvas/OverviewView";
 import { Player, resolveRange } from "../canvas/playback";
 import { engine, errorMessage } from "../engine/bridge";
-import type { Command, FrameId, GodotOptions, Outcome, SessionView } from "../engine/types";
-import { getEditor, selectFrames, setEditor, toast, useEditor } from "../state/editor";
+import type {
+  ArtboardId,
+  Command,
+  FrameId,
+  GodotOptions,
+  Outcome,
+  ProjectCommand,
+  SessionView,
+} from "../engine/types";
+import { getEditor, selectFrames, setEditor, toast, useEditor, type Mode } from "../state/editor";
 
 /** Neutral mid-gray that reads on both themes and on most palettes. */
 const SILHOUETTE_COLOR = "#8a8f98ff";
@@ -20,13 +30,18 @@ const SILHOUETTE_OPACITY = 115;
  */
 class Controller {
   readonly cache = new CelCache();
-  /** Engine composites, read through the queue so they follow edits. */
-  readonly frames = new FrameStore((f) => this.enqueue(() => engine.readFrame(f)));
+  /** Composited artboards for the library and overview. */
+  readonly images = new ArtboardImages((id) => this.enqueue(() => engine.composite(id)));
+  /** Engine composites of the active artboard, read through the queue so they follow edits. */
+  readonly frames = new FrameStore((f) =>
+    this.enqueue(() => engine.readFrame(activeArtboard(), f)),
+  );
   /** Timeline playback, shown on the canvas. */
   readonly player = new Player(durations);
   /** Independent loop in the preview panel; keeps running while editing. */
   readonly previewPlayer = new Player(durations);
   view: CanvasView | null = null;
+  overview: OverviewView | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private initialized: Promise<void> | null = null;
 
@@ -78,25 +93,34 @@ class Controller {
     });
   }
 
-  /** Install a session from the engine; `reset` reloads all pixels. */
+  /**
+   * Install a session from the engine. `reset` means a different project:
+   * all pixels and thumbnails reload. Switching the active artboard reloads
+   * the editor's pixels too.
+   */
   private async adopt(view: SessionView, reset: boolean) {
     const s = getEditor();
     const { layers, frames } = view.summary;
-    const prev = s.session?.summary;
+    const prev = s.session;
+    const switched = reset || !prev || prev.active_artboard !== view.active_artboard;
     const layerOk = layers.some((l) => l.id === s.activeLayerId);
     const frameOk = frames.some((f) => f.id === s.activeFrameId);
     const sizeChanged =
-      !prev || prev.width !== view.summary.width || prev.height !== view.summary.height;
+      !prev ||
+      prev.summary.width !== view.summary.width ||
+      prev.summary.height !== view.summary.height;
     setEditor({
       session: view,
-      activeLayerId: !reset && layerOk ? s.activeLayerId : (layers.at(-1)?.id ?? null),
-      activeFrameId: !reset && frameOk ? s.activeFrameId : (frames[0]?.id ?? null),
+      activeLayerId: !switched && layerOk ? s.activeLayerId : (layers.at(-1)?.id ?? null),
+      activeFrameId: !switched && frameOk ? s.activeFrameId : (frames[0]?.id ?? null),
     });
-    if (reset || sizeChanged) {
+    if (reset) this.images.reset(view.project.artboards);
+    else this.images.sync(view.project.artboards);
+    if (switched || sizeChanged) {
       this.cache.reset(view.summary.width, view.summary.height);
       this.frames.reset(view.summary.width, view.summary.height);
     } else this.frames.retain(frames.map((f) => f.id));
-    if (reset) {
+    if (switched) {
       this.player.pause();
       setEditor({ playTag: null, frameAnchor: null, tagDialog: null });
     } else {
@@ -107,30 +131,43 @@ class Controller {
       if (s2.frameAnchor != null && !frames.some((f) => f.id === s2.frameAnchor))
         setEditor({ frameAnchor: null });
     }
-    if (reset || sizeChanged || !frameOk) await this.loadFrame();
-    if (reset) this.view?.fitToWindow();
-    if (reset && getEditor().previewPlaying && getEditor().previewOpen) this.startPreview();
+    if (switched || sizeChanged || !frameOk) await this.loadFrame();
+    if (switched) this.view?.fitToWindow();
+    if (reset) this.overview?.fitToWindow();
+    if (switched && getEditor().previewPlaying && getEditor().previewOpen) this.startPreview();
   }
 
   /** Read every layer of the active frame from the engine. */
   private async loadFrame() {
     const { session, activeFrameId } = getEditor();
     if (!session || activeFrameId == null) return;
+    const artboard = session.active_artboard;
     const { width, height, layers } = session.summary;
     const rect = { x: 0, y: 0, width, height };
     for (const l of layers) {
-      this.cache.putRegion(l.id, rect, await engine.readCel(l.id, activeFrameId));
+      this.cache.putRegion(l.id, rect, await engine.readCel(artboard, l.id, activeFrameId));
     }
     this.cache.retain(layers.map((l) => l.id));
     this.view?.invalidate();
   }
 
-  private async applyOutcome(o: Outcome | null) {
+  private async applyOutcome(o: Outcome | null, follow = false) {
     if (!o?.changed) return;
+    let view = await engine.view();
+    // Undo/redo of an edit on another artboard: show that artboard.
+    const touched = o.artboards.filter((id) => view.project.artboards.some((a) => a.id === id));
+    if (follow && touched.length && !touched.includes(view.active_artboard)) {
+      view = await engine.activate(touched[0]!);
+    }
+    const before = getEditor().session?.active_artboard;
     // Visibility, opacity and frame changes can alter any composite.
-    if (o.structure_changed) this.frames.invalidate();
-    else this.frames.invalidate(o.dirty.map((d) => d.frame));
-    await this.adopt(await engine.view(), false);
+    if (before === view.active_artboard) {
+      if (o.structure_changed) this.frames.invalidate();
+      else this.frames.invalidate(o.dirty.filter((d) => d.artboard === before).map((d) => d.frame));
+    }
+    await this.adopt(view, false);
+    this.images.invalidate(o.artboards);
+    if (before !== view.active_artboard) return;
     // Keep the preview's range valid after frames or tags changed.
     if (o.structure_changed && this.previewPlayer.playing) this.startPreview();
     const createdLayer = o.created.find((c) => "layer" in c);
@@ -143,19 +180,29 @@ class Controller {
     }
     const frame = getEditor().activeFrameId;
     for (const d of o.dirty) {
-      if (d.frame !== frame) continue;
-      this.cache.putRegion(d.layer, d.rect, await engine.readCel(d.layer, d.frame, d.rect));
+      if (d.frame !== frame || d.artboard !== view.active_artboard) continue;
+      const pixels = await engine.readCel(d.artboard, d.layer, d.frame, d.rect);
+      this.cache.putRegion(d.layer, d.rect, pixels);
     }
     this.view?.invalidate();
   }
 
-  /** Execute a command through the shared engine. Errors become toasts. */
+  /** Execute a document command on the active artboard. Errors become toasts. */
   run = (command: Command): Promise<Outcome | null> => {
+    const artboard = getEditor().session?.active_artboard;
+    if (artboard == null) return Promise.resolve(null);
+    return this.runProject({ type: "edit", artboard, command });
+  };
+
+  /** Execute a project command through the shared engine. Errors become toasts. */
+  runProject = (command: ProjectCommand): Promise<Outcome | null> => {
     this.stopPlayback();
     return this.enqueue(async () => {
       try {
         const o = await engine.execute(command);
         await this.applyOutcome(o);
+        const created = o.created.find((c) => "artboard" in c);
+        if (created && "artboard" in created) await this.activateNow(created.artboard);
         return o;
       } catch (e) {
         toast(errorMessage(e), "error");
@@ -171,7 +218,7 @@ class Controller {
     return this.enqueue(async () => {
       const label = getEditor().session?.summary.undo_label;
       const o = await engine.undo();
-      await this.applyOutcome(o);
+      await this.applyOutcome(o, true);
       if (o && label) toast(`Undo ${label}`);
     });
   };
@@ -181,9 +228,27 @@ class Controller {
     return this.enqueue(async () => {
       const label = getEditor().session?.summary.redo_label;
       const o = await engine.redo();
-      await this.applyOutcome(o);
+      await this.applyOutcome(o, true);
       if (o && label) toast(`Redo ${label}`);
     });
+  };
+
+  // ── Library ──────────────────────────────────────────────────────────
+
+  private async activateNow(artboard: ArtboardId) {
+    if (getEditor().session?.active_artboard === artboard) return;
+    await this.adopt(await engine.activate(artboard), false);
+  }
+
+  /** Make an artboard active; `edit` also switches to the editor. */
+  selectArtboard = (artboard: ArtboardId, edit = false) => {
+    if (edit) setEditor({ mode: "editor" });
+    return this.guard(() => this.enqueue(() => this.activateNow(artboard)));
+  };
+
+  setMode = (mode: Mode) => {
+    setEditor({ mode });
+    if (mode === "editor") this.view?.invalidate();
   };
 
   selectFrame = (frame: FrameId, extend = false) => {
@@ -328,9 +393,9 @@ class Controller {
   }
 
   async exportPng(scale = 1) {
-    const frame = getEditor().activeFrameId;
-    if (frame == null) return;
-    const path = await this.guard(() => engine.exportPng(frame, scale));
+    const { activeFrameId: frame, session } = getEditor();
+    if (frame == null || !session) return;
+    const path = await this.guard(() => engine.exportPng(session.active_artboard, frame, scale));
     if (path) toast(`Exported ${baseName(path)}`);
   }
 
@@ -363,6 +428,16 @@ class Controller {
     if (files) toast(`Exported ${baseName(files.tres)} for Godot`);
   }
 
+  /** Every artboard into a folder, mirroring library folders. */
+  async exportAll(godot: boolean) {
+    const s = getEditor();
+    const options: GodotOptions | null = godot
+      ? { sheet: { ...s.exportSheet, scale: s.exportScale }, res_dir: null }
+      : null;
+    const result = await this.guard(() => engine.exportAll(s.exportScale, options));
+    if (result) toast(`Exported ${result.files} artboards to ${baseName(result.dir)}`);
+  }
+
   async restoreRecovery() {
     setEditor({ recovery: null });
     await this.guard(() =>
@@ -386,6 +461,11 @@ class Controller {
 
   // ── Menu ─────────────────────────────────────────────────────────────
 
+  /** The canvas that view commands (zoom, fit) apply to. */
+  activeView(): CanvasView | OverviewView | null {
+    return getEditor().mode === "overview" ? this.overview : this.view;
+  }
+
   async menu(id: string) {
     const typing = isTyping();
     switch (id) {
@@ -399,6 +479,12 @@ class Controller {
         return this.saveAs();
       case "export_png":
         return setEditor({ exportOpen: true });
+      case "export_all":
+        return setEditor({ exportAllOpen: true });
+      case "toggle_overview":
+        return this.setMode(getEditor().mode === "overview" ? "editor" : "overview");
+      case "toggle_library":
+        return setEditor((s) => ({ libraryOpen: !s.libraryOpen }));
       case "export_godot":
         return setEditor({ exportOpen: true, exportKind: "godot" });
       case "undo":
@@ -407,13 +493,13 @@ class Controller {
       case "redo":
         return typing ? document.execCommand("redo") : this.redo();
       case "zoom_in":
-        return this.view?.zoomStep(1);
+        return this.activeView()?.zoomStep(1);
       case "zoom_out":
-        return this.view?.zoomStep(-1);
+        return this.activeView()?.zoomStep(-1);
       case "zoom_actual":
-        return this.view?.actualSize();
+        return this.activeView()?.actualSize();
       case "zoom_fit":
-        return this.view?.fitToWindow();
+        return this.activeView()?.fitToWindow();
       case "toggle_rulers":
         return setEditor((s) => ({ showRulers: !s.showRulers }));
       case "toggle_grid":
@@ -437,6 +523,10 @@ function durations() {
 
 function baseName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+function activeArtboard(): ArtboardId {
+  return getEditor().session?.active_artboard ?? 0;
 }
 
 export function isTyping(): boolean {

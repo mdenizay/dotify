@@ -4,6 +4,7 @@
 pub mod gif;
 pub mod godot;
 pub mod meta;
+pub mod project;
 pub mod sheet;
 
 use std::path::Path;

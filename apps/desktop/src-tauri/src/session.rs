@@ -1,37 +1,58 @@
-//! The open document, its file path, and crash-recovery autosave.
+//! The open project, its active artboard, its file path, and crash-recovery
+//! autosave.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dotify_core::format::{self, WriteOptions};
-use dotify_core::{Document, DocumentSummary, Editor};
+use dotify_core::{ArtboardId, DocumentSummary, Project, ProjectEditor, ProjectSummary};
 use serde::{Deserialize, Serialize};
 
 pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct Session {
-    pub editor: Editor,
+    pub editor: ProjectEditor,
     pub path: Option<PathBuf>,
+    /// The artboard open in the editor. Use [`Session::active`], which falls
+    /// back to the first artboard if this one was deleted (e.g. by undo).
+    active: ArtboardId,
     /// Revision captured by the last recovery write.
     pub autosaved_revision: Option<u64>,
 }
 
 impl Session {
-    pub fn new(doc: Document, path: Option<PathBuf>) -> Self {
-        Self { editor: Editor::new(doc), path, autosaved_revision: None }
+    pub fn new(project: Project, path: Option<PathBuf>) -> Self {
+        let active = project.artboards()[0].id();
+        Self { editor: ProjectEditor::new(project), path, active, autosaved_revision: None }
+    }
+
+    pub fn active(&self) -> ArtboardId {
+        let project = self.editor.project();
+        match project.artboard(self.active) {
+            Ok(a) => a.id(),
+            Err(_) => project.artboards()[0].id(),
+        }
+    }
+
+    pub fn set_active(&mut self, artboard: ArtboardId) -> Result<(), dotify_core::CoreError> {
+        self.active = self.editor.project().artboard(artboard)?.id();
+        Ok(())
     }
 
     pub fn file_name(&self) -> String {
         match &self.path {
             Some(p) => p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-            None => format!("{}.{}", self.editor.document().name(), format::FILE_EXTENSION),
+            None => format!("{}.{}", self.editor.project().name(), format::FILE_EXTENSION),
         }
     }
 
     pub fn view(&self) -> SessionView {
+        let active = self.active();
         SessionView {
-            summary: self.editor.summary(),
+            project: self.editor.summary(),
+            active_artboard: active,
+            summary: self.editor.document_summary(active).expect("active artboard exists"),
             path: self.path.as_ref().map(|p| p.display().to_string()),
             file_name: self.file_name(),
         }
@@ -40,6 +61,9 @@ impl Session {
 
 #[derive(Serialize)]
 pub struct SessionView {
+    pub project: ProjectSummary,
+    pub active_artboard: ArtboardId,
+    /// The active artboard, with the project's history state.
     pub summary: DocumentSummary,
     pub path: Option<String>,
     pub file_name: String,
@@ -60,8 +84,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(recovery_dir: PathBuf) -> Self {
-        let doc = Document::new("Untitled", 32, 32).expect("default canvas size is valid");
-        Self { session: Mutex::new(Session::new(doc, None)), recovery_dir }
+        let project = Project::new("Untitled", 32, 32).expect("default canvas size is valid");
+        Self { session: Mutex::new(Session::new(project, None)), recovery_dir }
     }
 
     pub fn lock(&self) -> MutexGuard<'_, Session> {
@@ -78,22 +102,22 @@ impl AppState {
         self.recovery_dir.join("recovery.json")
     }
 
-    /// Write a recovery copy if the document changed since the last one.
+    /// Write a recovery copy if the project changed since the last one.
     pub fn autosave(&self) -> Result<bool, String> {
-        let (doc, info, revision) = {
+        let (project, info, revision) = {
             let s = self.lock();
             if !s.editor.is_dirty() || s.autosaved_revision == Some(s.editor.revision()) {
                 return Ok(false);
             }
             let info = RecoveryInfo {
-                name: s.editor.document().name().to_string(),
+                name: s.editor.project().name().to_string(),
                 original_path: s.path.as_ref().map(|p| p.display().to_string()),
                 saved_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
             };
-            (s.editor.document().clone(), info, s.editor.revision())
+            (s.editor.project().clone(), info, s.editor.revision())
         };
         std::fs::create_dir_all(&self.recovery_dir).map_err(|e| e.to_string())?;
-        format::save(&doc, &self.recovery_file(), WriteOptions { thumbnail: false }).map_err(|e| e.to_string())?;
+        format::save(&project, &self.recovery_file(), WriteOptions { thumbnail: false }).map_err(|e| e.to_string())?;
         let meta = serde_json::to_vec(&info).map_err(|e| e.to_string())?;
         dotify_export::write_atomic(&self.recovery_meta(), &meta).map_err(|e| e.to_string())?;
         self.lock().autosaved_revision = Some(revision);
@@ -108,10 +132,10 @@ impl AppState {
         serde_json::from_slice(&meta).ok()
     }
 
-    pub fn take_recovery(&self) -> Result<(Document, Option<PathBuf>), String> {
-        let doc = format::load(&self.recovery_file()).map_err(|e| e.to_string())?;
+    pub fn take_recovery(&self) -> Result<(Project, Option<PathBuf>), String> {
+        let project = format::load(&self.recovery_file()).map_err(|e| e.to_string())?;
         let path = self.recovery_info().and_then(|i| i.original_path).map(PathBuf::from);
-        Ok((doc, path))
+        Ok((project, path))
     }
 
     pub fn discard_recovery(&self) {

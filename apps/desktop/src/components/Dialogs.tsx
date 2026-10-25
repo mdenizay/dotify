@@ -2,7 +2,16 @@ import { useState } from "react";
 import { controller } from "../app/controller";
 import { sheetSize } from "../app/sheetSize";
 import { tagLanes } from "../app/tags";
-import { selectFrames, selectTags, setEditor, useEditor, type ExportKind } from "../state/editor";
+import type { FolderId } from "../engine/types";
+import {
+  getEditor,
+  selectFolders,
+  selectFrames,
+  selectTags,
+  setEditor,
+  useEditor,
+  type ExportKind,
+} from "../state/editor";
 import { Button, Dialog, inputClass } from "./ui/primitives";
 
 const PRESETS = [16, 24, 32, 48, 64, 128, 256];
@@ -11,24 +20,83 @@ const MAX = 4096;
 export function NewDocumentDialog() {
   const open = useEditor((s) => s.newDocOpen);
   if (!open) return null;
-  return <NewDocumentForm />;
+  return (
+    <SpriteForm
+      title="New Project"
+      initialName="Untitled"
+      submitLabel="Create"
+      onClose={() => setEditor({ newDocOpen: false })}
+      onSubmit={(name, width, height) => void controller.newDocument(name, width, height)}
+    />
+  );
 }
 
-function NewDocumentForm() {
-  const [name, setName] = useState("Untitled");
-  const [width, setWidth] = useState(32);
-  const [height, setHeight] = useState(32);
+/** Adds an artboard to the project, sized like the active one by default. */
+export function NewArtboardDialog() {
+  const open = useEditor((s) => s.newArtboardOpen);
+  if (!open) return null;
+  const s = getEditor();
+  const active = s.session?.project.artboards.find((a) => a.id === s.session?.active_artboard);
+  return (
+    <SpriteForm
+      title="New Artboard"
+      initialName=""
+      namePlaceholder="Sprite name"
+      initialSize={active ? { width: active.width, height: active.height } : undefined}
+      initialFolder={active?.folder ?? null}
+      withFolder
+      submitLabel="Add"
+      onClose={() => setEditor({ newArtboardOpen: false })}
+      onSubmit={(name, width, height, folder) =>
+        void controller.runProject({
+          type: "create_artboard",
+          name: name.trim() || null,
+          width,
+          height,
+          folder,
+        })
+      }
+    />
+  );
+}
+
+function SpriteForm({
+  title,
+  initialName,
+  namePlaceholder,
+  initialSize = { width: 32, height: 32 },
+  initialFolder = null,
+  withFolder,
+  submitLabel,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  initialName: string;
+  namePlaceholder?: string;
+  initialSize?: { width: number; height: number };
+  initialFolder?: FolderId | null;
+  withFolder?: boolean;
+  submitLabel: string;
+  onClose: () => void;
+  onSubmit: (name: string, width: number, height: number, folder: FolderId | null) => void;
+}) {
+  const folders = useEditor(selectFolders);
+  const [name, setName] = useState(initialName);
+  const [width, setWidth] = useState(initialSize.width);
+  const [height, setHeight] = useState(initialSize.height);
+  const [folder, setFolder] = useState<FolderId | null>(initialFolder);
   const valid = width >= 1 && height >= 1 && width <= MAX && height <= MAX;
-  const close = () => setEditor({ newDocOpen: false });
+  const close = onClose;
   const submit = () => {
     if (!valid) return;
     close();
-    void controller.newDocument(name, width, height);
+    onSubmit(name, width, height, folder);
   };
   const num = (v: string) => Math.max(0, Math.round(Number(v) || 0));
 
   return (
-    <Dialog title="New Sprite" onClose={close}>
+    <Dialog title={title} onClose={close}>
       <form
         className="flex flex-col gap-3"
         onSubmit={(e) => {
@@ -38,8 +106,30 @@ function NewDocumentForm() {
       >
         <label className="flex flex-col gap-1 text-dim">
           Name
-          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            className={inputClass}
+            value={name}
+            placeholder={namePlaceholder}
+            onChange={(e) => setName(e.target.value)}
+          />
         </label>
+        {withFolder && folders.length > 0 && (
+          <label className="flex flex-col gap-1 text-dim">
+            Folder
+            <select
+              className={inputClass}
+              value={folder ?? ""}
+              onChange={(e) => setFolder(e.target.value === "" ? null : Number(e.target.value))}
+            >
+              <option value="">No folder</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="flex gap-2">
           <label className="flex flex-1 flex-col gap-1 text-dim">
             Width
@@ -89,7 +179,7 @@ function NewDocumentForm() {
             Cancel
           </Button>
           <Button variant="primary" type="submit" disabled={!valid}>
-            Create
+            {submitLabel}
           </Button>
         </div>
       </form>
@@ -301,6 +391,68 @@ function ExportForm() {
 
 function range(a: number, b: number) {
   return Array.from({ length: b - a + 1 }, (_, i) => a + i);
+}
+
+/** First frame of every artboard as PNG, one sub-folder per library folder. */
+export function ExportAllDialog() {
+  const open = useEditor((s) => s.exportAllOpen);
+  const scale = useEditor((s) => s.exportScale);
+  const count = useEditor((s) => s.session?.project.artboards.length ?? 0);
+  const godot = useEditor((s) => s.exportKind === "godot");
+  if (!open) return null;
+  const close = () => setEditor({ exportAllOpen: false });
+  const submit = () => {
+    close();
+    void controller.exportAll(godot);
+  };
+  return (
+    <Dialog title="Export All Artboards" onClose={close} width={320}>
+      <div className="flex flex-col gap-3">
+        <div role="tablist" className="flex gap-1 rounded-md border border-line p-0.5">
+          {(["png", "godot"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={godot === (k === "godot")}
+              onClick={() => setEditor({ exportKind: k })}
+              className={`h-6 flex-1 rounded-[4px] text-[11px] font-medium ${
+                godot === (k === "godot") ? "bg-accent-soft text-fg" : "text-dim hover:text-fg"
+              }`}
+            >
+              {k === "godot" ? "Godot 4" : "PNG"}
+            </button>
+          ))}
+        </div>
+        <div className="text-dim">
+          {godot
+            ? `A spritesheet, SpriteFrames .tres and .json for each of the ${count} artboards, using the spritesheet settings from Export.`
+            : `First frame of each of the ${count} artboards as PNG.`}{" "}
+          One sub-folder per library folder.
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {SCALES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setEditor({ exportScale: s })}
+              className={chipClass(scale === s)}
+            >
+              {s}×
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button data-dismiss onClick={close}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={submit}>
+            Choose Folder…
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
 }
 
 export function RecoveryDialog() {

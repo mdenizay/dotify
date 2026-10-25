@@ -597,7 +597,7 @@ impl Command {
     }
 }
 
-fn invalid(msg: String) -> CoreError {
+pub(crate) fn invalid(msg: String) -> CoreError {
     CoreError::InvalidArgument(msg)
 }
 
@@ -640,7 +640,7 @@ fn pixel_op(
     Compiled::ops(vec![Op::PutRegion { layer, frame, rect, pixels }])
 }
 
-fn validate_name(name: &str) -> CoreResult<String> {
+pub(crate) fn validate_name(name: &str) -> CoreResult<String> {
     let name = name.trim();
     if name.is_empty() {
         return Err(invalid("name must not be empty".into()));
@@ -651,7 +651,7 @@ fn validate_name(name: &str) -> CoreResult<String> {
     Ok(name.to_string())
 }
 
-fn truncate_name(name: String) -> String {
+pub(crate) fn truncate_name(name: String) -> String {
     name.chars().take(MAX_NAME_LEN).collect()
 }
 

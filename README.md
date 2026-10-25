@@ -25,10 +25,14 @@ through the same command engine you use by hand.
   onion skinning (previous/next count, opacity, red/blue tint), animation
   tags over frame ranges with direction and loop, and a live preview panel
   that keeps looping while you draw
+- Project library: many artboards (sprites) per project, each with its own
+  size, layers, frames and tags, sharing one palette; folders, search, drag
+  and drop, and an overview of all artboards side by side
 - Undo/redo of every edit, with labels
 - Native `.dotify` project format (versioned ZIP, lossless, checksummed),
   atomic saves, autosave with crash recovery
-- PNG export at 1×–16× with nearest-neighbour scaling
+- PNG export at 1×–16× with nearest-neighbour scaling, for one artboard or
+  all of them at once
 - Spritesheet export (grid or one row per tag, padding, edge extrusion) with
   JSON metadata, and animated GIF export with exact colors
 - Godot 4 export: spritesheet PNG + `SpriteFrames` `.tres` with one
@@ -109,15 +113,22 @@ cargo run -p dotify-cli -- export-gif hero.dotify walk.gif --tag Walk --scale 4
 cargo run -p dotify-cli -- export-sheet hero.dotify hero.png --layout rows --extrude 1
 ```
 
-`apply` takes the same JSON commands as the desktop app (see
-`crates/dotify-core/src/command.rs`); an array is applied atomically. Tags
-are edited the same way, for example
+```bash
+cargo run -p dotify-cli -- export-all game.dotify ~/game/sprites --godot
+```
+
+`apply` takes the same JSON commands as the desktop app: project commands
+(`create_artboard`, `create_folder`, `edit`, … in
+`crates/dotify-core/src/project/command.rs`) and document commands (in
+`crates/dotify-core/src/command.rs`), which apply to `--artboard` (default:
+the first artboard). The export commands take `--artboard` too. An array is
+applied atomically. Tags are edited the same way, for example
 `{"type":"create_tag","name":"Walk","from":2,"to":5,"direction":"ping_pong"}`.
 
 ### Godot 4
 
-File ▸ Export for Godot… (⇧⌘E) or `dotify export-godot` writes three files
-into a folder of your Godot project:
+File ▸ Export for Godot… (⇧⌘E) or `dotify export-godot` writes three files for the
+active artboard into a folder of your Godot project:
 
 - `<name>.png` – the spritesheet
 - `<name>.tres` – a `SpriteFrames` resource with one animation per tag (or a
