@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
+- Copy a frame onto the next frame, or carry it over as a gray silhouette layer to trace the next pose over (Frames toolbar)
+- Fix the Frames panel not showing its frames again after being collapsed
 - Timeline playback with loop, once and ping-pong modes, honoring per-frame durations
 - Onion skinning with configurable previous/next frame counts, opacity and tint
 - Animation tags: create, rename, recolor, retime, set direction and loop, delete — all undoable
