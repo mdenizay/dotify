@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `dotify-mcp`: a Model Context Protocol server over stdio (Claude Code, Claude Desktop) and Streamable HTTP (ChatGPT developer mode through a tunnel). Projects, drawing, layers, frames, tags, palette, batch, undo/redo, canvas previews and every export, each call one undoable step
+- MCP safety: access limited to `--root` directories, bearer token for HTTP (loopback by default), `confirm: true` for deletes and overwrites, `--read-only` mode, `expected_revision` checks
+- The `dotify-cli` Homebrew formula now also installs `dotify-mcp`
+
 ## 0.1.3
 
 - Copy a frame onto the next frame, or carry it over as a gray silhouette layer to trace the next pose over (Frames toolbar)
