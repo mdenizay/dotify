@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Artboards are now called sprites throughout the app; the file format, CLI and MCP tools are unchanged
+- A visible New Sprite button in the Sprites panel, and a labeled "Sprites" button in the top bar (with the sprite count) to show or hide the panel
+- File menu: New Sprite (⌘N) adds a sprite to the open project; New Project moved to ⇧⌘N
+
 ## 0.1.4
 
 - Multiple palettes: switch between built-in presets (PICO-8, Game Boy, 1-bit) and your own; import `.gpl`, `.hex`, `.pal`, Paint.NET `.txt` or PNG swatch files, save the current palette, export as `.gpl`
