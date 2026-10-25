@@ -149,6 +149,32 @@ pub enum Command {
         frame: FrameId,
         duration_ms: u32,
     },
+    /// Replace the pixels of frame `to` with those of frame `from`, on every
+    /// unlocked layer or only on `layer`.
+    CopyFrame {
+        from: FrameId,
+        to: FrameId,
+        #[serde(default)]
+        layer: Option<LayerId>,
+    },
+    /// Put a one-color silhouette of frame `from` (its visible pixels) on
+    /// frame `to`, as a new layer. Meant as a reference to draw the next pose
+    /// over, so the layer defaults to locked.
+    CopySilhouette {
+        from: FrameId,
+        to: FrameId,
+        color: Rgba,
+        #[serde(default)]
+        name: Option<String>,
+        /// Position from the bottom; defaults to the top of the stack.
+        #[serde(default)]
+        index: Option<usize>,
+        /// Layer opacity, 0–255. Defaults to 255.
+        #[serde(default)]
+        opacity: Option<u8>,
+        #[serde(default = "default_true")]
+        locked: bool,
+    },
     /// Name an inclusive frame range as an animation. Names are unique.
     CreateTag {
         name: String,
@@ -239,6 +265,8 @@ impl Command {
             Command::DeleteFrame { .. } => "Delete Frame",
             Command::MoveFrame { .. } => "Move Frame",
             Command::SetFrameDuration { .. } => "Frame Duration",
+            Command::CopyFrame { .. } => "Copy Frame",
+            Command::CopySilhouette { .. } => "Copy Silhouette",
             Command::CreateTag { .. } => "New Tag",
             Command::UpdateTag { .. } => "Tag Properties",
             Command::DeleteTag { .. } => "Delete Tag",
@@ -402,6 +430,72 @@ impl Command {
                 Ok(Compiled {
                     ops: vec![Op::SetNextId(id.0 + 1), Op::InsertFrame { index: src_index + 1, frame: copy, cels }],
                     created: Some(Created::Frame(id)),
+                })
+            }
+            Command::CopyFrame { from, to, layer } => {
+                doc.frame(*from)?;
+                doc.frame(*to)?;
+                if from == to {
+                    return Err(invalid("source and target frame are the same".into()));
+                }
+                let layers: Vec<LayerId> = match layer {
+                    Some(l) => {
+                        check_cel(doc, *l, *to)?;
+                        vec![*l]
+                    }
+                    None => doc.layers.iter().filter(|l| !l.locked).map(|l| l.id).collect(),
+                };
+                let mut ops = Vec::new();
+                for l in layers {
+                    let src = doc.cel_image(l, *from);
+                    let dst = doc.cel_image(l, *to);
+                    if src == dst {
+                        continue;
+                    }
+                    // Only the area that holds pixels in either frame changes.
+                    let rect = match (src.opaque_bounds(), dst.opaque_bounds()) {
+                        (Some(a), Some(b)) => a.union(&b),
+                        (Some(r), None) | (None, Some(r)) => r,
+                        (None, None) => continue,
+                    };
+                    ops.push(Op::PutRegion { layer: l, frame: *to, rect, pixels: src.read_region(rect) });
+                }
+                Compiled::ops(ops)
+            }
+            Command::CopySilhouette { from, to, color, name, index, opacity, locked } => {
+                doc.frame(*to)?;
+                let index = index.unwrap_or(doc.layers.len());
+                if index > doc.layers.len() {
+                    return Err(invalid(format!("layer index {index} out of range")));
+                }
+                if color.a == 0 {
+                    return Err(invalid("silhouette color must not be transparent".into()));
+                }
+                let composite = crate::composite::composite_frame(doc, *from)?;
+                let mut silhouette = crate::image::Image::new(doc.width, doc.height);
+                for y in 0..doc.height {
+                    for x in 0..doc.width {
+                        if composite.get(x, y).a != 0 {
+                            silhouette.set(x, y, *color);
+                        }
+                    }
+                }
+                if silhouette.is_transparent() {
+                    return Err(invalid("the source frame has no visible pixels".into()));
+                }
+                let id = LayerId(doc.alloc_id());
+                let mut layer = Layer::new(
+                    id,
+                    match name {
+                        Some(n) => validate_name(n)?,
+                        None => "Silhouette".into(),
+                    },
+                );
+                layer.opacity = opacity.unwrap_or(255);
+                layer.locked = *locked;
+                Ok(Compiled {
+                    ops: vec![Op::SetNextId(id.0 + 1), Op::InsertLayer { index, layer, cels: vec![(*to, silhouette)] }],
+                    created: Some(Created::Layer(id)),
                 })
             }
             Command::DeleteFrame { frame } => {

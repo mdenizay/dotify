@@ -690,4 +690,114 @@ mod tests {
             }
         );
     }
+
+    fn new_frame(e: &mut Editor) -> FrameId {
+        let Created::Frame(f) = e.execute(Command::AddFrame { index: None, duration_ms: None }).unwrap().created[0]
+        else {
+            panic!()
+        };
+        f
+    }
+
+    fn dot(e: &mut Editor, l: LayerId, f: FrameId, x: i32, y: i32, color: Rgba) {
+        e.execute(Command::SetPixels { layer: l, frame: f, pixels: vec![PixelWrite { x, y, color }] }).unwrap();
+    }
+
+    #[test]
+    fn copy_frame_replaces_target_on_unlocked_layers_and_undoes() {
+        let (mut e, l1, f1) = editor();
+        let Created::Layer(l2) = e.execute(Command::CreateLayer { name: None, index: None }).unwrap().created[0] else {
+            panic!()
+        };
+        let f2 = new_frame(&mut e);
+        dot(&mut e, l1, f1, 1, 1, RED);
+        dot(&mut e, l2, f1, 2, 2, BLUE);
+        dot(&mut e, l1, f2, 6, 6, BLUE); // overwritten by the copy
+        dot(&mut e, l2, f2, 7, 7, RED); // kept: l2 is locked below
+        e.execute(Command::UpdateLayer { layer: l2, name: None, visible: None, locked: Some(true), opacity: None })
+            .unwrap();
+        let before = e.document().clone();
+
+        e.execute(Command::CopyFrame { from: f1, to: f2, layer: None }).unwrap();
+        assert_eq!(px(&e, l1, f2, 1, 1), RED);
+        assert_eq!(px(&e, l1, f2, 6, 6), Rgba::TRANSPARENT);
+        assert_eq!(px(&e, l2, f2, 7, 7), RED, "locked layers are skipped");
+        assert_eq!(px(&e, l2, f2, 2, 2), Rgba::TRANSPARENT);
+        assert_eq!(px(&e, l1, f1, 1, 1), RED, "source is untouched");
+        assert_eq!(e.undo_label(), Some("Copy Frame"));
+
+        e.undo().unwrap();
+        assert_eq!(e.document(), &before);
+    }
+
+    #[test]
+    fn copy_frame_validates_its_arguments() {
+        let (mut e, l, f1) = editor();
+        let f2 = new_frame(&mut e);
+        assert!(matches!(
+            e.execute(Command::CopyFrame { from: f1, to: f1, layer: None }),
+            Err(CoreError::InvalidArgument(_))
+        ));
+        e.execute(Command::UpdateLayer { layer: l, name: None, visible: None, locked: Some(true), opacity: None })
+            .unwrap();
+        assert_eq!(
+            e.execute(Command::CopyFrame { from: f1, to: f2, layer: Some(l) }).unwrap_err(),
+            CoreError::LayerLocked(l)
+        );
+        // Both frames empty: valid, but nothing changes.
+        e.execute(Command::UpdateLayer { layer: l, name: None, visible: None, locked: Some(false), opacity: None })
+            .unwrap();
+        assert!(!e.execute(Command::CopyFrame { from: f1, to: f2, layer: None }).unwrap().changed);
+    }
+
+    #[test]
+    fn copy_silhouette_adds_a_flat_locked_layer_on_the_target_frame() {
+        let (mut e, l1, f1) = editor();
+        let f2 = new_frame(&mut e);
+        dot(&mut e, l1, f1, 1, 1, RED);
+        dot(&mut e, l1, f1, 3, 4, Rgba::new(0, 255, 0, 40));
+        let gray = Rgba::opaque(128, 128, 128);
+        let out = e
+            .execute(Command::CopySilhouette {
+                from: f1,
+                to: f2,
+                color: gray,
+                name: Some("Silhouette 1".into()),
+                index: Some(0),
+                opacity: Some(100),
+                locked: true,
+            })
+            .unwrap();
+        let Created::Layer(sil) = out.created[0] else { panic!() };
+        let layer = e.document().layer(sil).unwrap();
+        assert_eq!((layer.name.as_str(), layer.opacity, layer.locked), ("Silhouette 1", 100, true));
+        assert_eq!(e.document().layer_index(sil).unwrap(), 0, "placed below the drawing layer");
+        assert_eq!(px(&e, sil, f2, 1, 1), gray);
+        assert_eq!(px(&e, sil, f2, 3, 4), gray, "any visible pixel joins the silhouette");
+        assert_eq!(px(&e, sil, f2, 0, 0), Rgba::TRANSPARENT);
+        assert!(e.document().cel(sil, f1).is_none(), "only the target frame gets pixels");
+        e.undo().unwrap();
+        assert!(e.document().layer(sil).is_err());
+    }
+
+    #[test]
+    fn copy_silhouette_rejects_empty_or_hidden_sources() {
+        let (mut e, l1, f1) = editor();
+        let f2 = new_frame(&mut e);
+        let sil = |from| Command::CopySilhouette {
+            from,
+            to: f2,
+            color: RED,
+            name: None,
+            index: None,
+            opacity: None,
+            locked: true,
+        };
+        assert!(matches!(e.execute(sil(f1)), Err(CoreError::InvalidArgument(_))));
+        dot(&mut e, l1, f1, 0, 0, BLUE);
+        e.execute(Command::UpdateLayer { layer: l1, name: None, visible: Some(false), locked: None, opacity: None })
+            .unwrap();
+        assert!(matches!(e.execute(sil(f1)), Err(CoreError::InvalidArgument(_))), "hidden layers don't count");
+        assert!(!e.can_redo());
+    }
 }

@@ -72,7 +72,8 @@ export class CanvasView implements ToolHost {
   ) {
     this.cache = deps.cache;
     this.canvas = document.createElement("canvas");
-    this.canvas.className = "block h-full w-full touch-none outline-none";
+    // Absolutely positioned so its pixel size never feeds back into the layout.
+    this.canvas.className = "absolute inset-0 block h-full w-full touch-none outline-none";
     this.canvas.tabIndex = 0;
     container.appendChild(this.canvas);
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;

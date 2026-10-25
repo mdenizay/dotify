@@ -107,6 +107,17 @@ export type Command =
   | { type: "delete_frame"; frame: FrameId }
   | { type: "move_frame"; frame: FrameId; index: number }
   | { type: "set_frame_duration"; frame: FrameId; duration_ms: number }
+  | { type: "copy_frame"; from: FrameId; to: FrameId; layer?: LayerId | null }
+  | {
+      type: "copy_silhouette";
+      from: FrameId;
+      to: FrameId;
+      color: Hex;
+      name?: string | null;
+      index?: number | null;
+      opacity?: number | null;
+      locked?: boolean;
+    }
   | {
       type: "create_tag";
       name: string;

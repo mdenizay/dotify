@@ -33,7 +33,8 @@ function CanvasHost() {
       view.dispose();
     };
   }, []);
-  return <div ref={ref} className="relative min-h-0 min-w-0 flex-1 bg-workspace" />;
+  // Clipped, so the canvas can never paint over the timeline below it.
+  return <div ref={ref} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-workspace" />;
 }
 
 function RightPanel() {

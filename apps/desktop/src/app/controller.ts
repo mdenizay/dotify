@@ -9,6 +9,11 @@ import { engine, errorMessage } from "../engine/bridge";
 import type { Command, FrameId, GodotOptions, Outcome, SessionView } from "../engine/types";
 import { getEditor, selectFrames, setEditor, toast, useEditor } from "../state/editor";
 
+/** Neutral mid-gray that reads on both themes and on most palettes. */
+const SILHOUETTE_COLOR = "#8a8f98ff";
+/** About 45%: visible enough to trace, faint enough to draw over. */
+const SILHOUETTE_OPACITY = 115;
+
 /**
  * Coordinates the engine, the render cache and the stores. All engine calls
  * run through one queue so commands and their read-backs stay ordered.
@@ -189,6 +194,48 @@ class Controller {
     if (s.activeFrameId === frame) return;
     setEditor({ activeFrameId: frame });
     return this.enqueue(() => this.loadFrame());
+  };
+
+  /**
+   * Carry the active frame over to the next one (created if this is the last
+   * frame), then move there. "pixels" copies every unlocked layer;
+   * "silhouette" adds a faint, locked one-color layer to trace the next pose
+   * over, and keeps drawing on the layer you were using.
+   */
+  copyToNextFrame = async (mode: "pixels" | "silhouette") => {
+    const s = getEditor();
+    const summary = s.session?.summary;
+    if (!summary || s.activeFrameId == null) return;
+    const from = s.activeFrameId;
+    const index = summary.frames.findIndex((f) => f.id === from);
+    let to = summary.frames[index + 1]?.id;
+    if (to == null) {
+      if (mode === "pixels") return void (await this.run({ type: "duplicate_frame", frame: from }));
+      const added = await this.run({ type: "add_frame", index: index + 1 });
+      const created = added?.created.find((c) => "frame" in c);
+      if (!created || !("frame" in created)) return;
+      to = created.frame;
+    }
+    if (mode === "pixels") {
+      const o = await this.run({ type: "copy_frame", from, to });
+      if (o) await this.selectFrame(to);
+      return;
+    }
+    const drawingLayer = s.activeLayerId;
+    const below = summary.layers.findIndex((l) => l.id === drawingLayer);
+    const o = await this.run({
+      type: "copy_silhouette",
+      from,
+      to,
+      color: SILHOUETTE_COLOR,
+      name: `Silhouette of frame ${index + 1}`,
+      index: below < 0 ? 0 : below,
+      opacity: SILHOUETTE_OPACITY,
+      locked: true,
+    });
+    if (!o) return;
+    if (drawingLayer != null) setEditor({ activeLayerId: drawingLayer });
+    await this.selectFrame(to);
   };
 
   // ── Playback ─────────────────────────────────────────────────────────

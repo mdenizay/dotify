@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowRightFromLine,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
   Ghost,
   Pause,
+  PersonStanding,
   Play,
   Plus,
   Settings2,
@@ -180,6 +182,24 @@ export function Timeline() {
           onClick={() => active && void run({ type: "duplicate_frame", frame: active.id })}
         >
           <Copy size={12} />
+        </IconButton>
+        <IconButton
+          label={
+            index < frames.length - 1
+              ? `Copy frame ${index + 1} onto frame ${index + 2}`
+              : "Copy this frame into a new next frame"
+          }
+          disabled={!active}
+          onClick={() => void controller.copyToNextFrame("pixels")}
+        >
+          <ArrowRightFromLine size={13} />
+        </IconButton>
+        <IconButton
+          label={`Copy frame ${index + 1} to the next frame as a silhouette to trace over`}
+          disabled={!active}
+          onClick={() => void controller.copyToNextFrame("silhouette")}
+        >
+          <PersonStanding size={13} />
         </IconButton>
         <IconButton
           label="Delete frame"
