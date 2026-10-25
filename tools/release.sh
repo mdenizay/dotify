@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds Dotify and the dotify CLI, signs and notarizes them, publishes a GitHub
-# release with auto-update metadata, and updates the cask and formula in
-# mdenizay/homebrew-tap.
+# Builds Dotify, the dotify CLI and the dotify-mcp server, signs and notarizes
+# them, publishes a GitHub release with auto-update metadata, and updates the
+# cask and formula in mdenizay/homebrew-tap.
 #
 # Needs: `gh auth login`, a Developer ID Application certificate in the
 # keychain, notary credentials stored with
@@ -59,15 +59,17 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 # ── Build and sign ─────────────────────────────────────────────────────────
 pnpm install --frozen-lockfile
 APPLE_SIGNING_IDENTITY="$IDENTITY" pnpm --filter @dotify/desktop tauri build --bundles app
-cargo build --release -p dotify-cli
+cargo build --release -p dotify-cli -p dotify-mcp
 
 SIGNATURE="$(codesign -dvv "$APP" 2>&1 || true)"
 [[ "$SIGNATURE" == *"Authority=Developer ID Application"* ]] \
     || fail "app is not Developer ID signed; Gatekeeper would block it"
 
 CLI_DIR="$(mktemp -d)"
-cp target/release/dotify "$CLI_DIR/dotify"
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CLI_DIR/dotify"
+for BIN in dotify dotify-mcp; do
+    cp "target/release/$BIN" "$CLI_DIR/$BIN"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$CLI_DIR/$BIN"
+done
 
 # ── Notarize ───────────────────────────────────────────────────────────────
 ditto -c -k --norsrc --noextattr --noqtn --keepParent "$APP" "$ZIP"
@@ -78,9 +80,9 @@ ditto -c -k --norsrc --noextattr --noqtn --keepParent "$APP" "$ZIP"
 spctl --assess --type execute "$APP"
 
 # Command-line tools can't be stapled; notarize so Gatekeeper finds the ticket online.
-(cd "$CLI_DIR" && ditto -c -k dotify "$CLI_DIR/dotify.zip")
-xcrun notarytool submit "$CLI_DIR/dotify.zip" --keychain-profile "$PROFILE" --wait
-COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$CLI_TGZ" -C "$CLI_DIR" dotify
+(cd "$CLI_DIR" && zip -q "$CLI_DIR/cli.zip" dotify dotify-mcp)
+xcrun notarytool submit "$CLI_DIR/cli.zip" --keychain-profile "$PROFILE" --wait
+COPYFILE_DISABLE=1 tar --no-mac-metadata -czf "$CLI_TGZ" -C "$CLI_DIR" dotify dotify-mcp
 rm -rf "$CLI_DIR"
 
 # ── Auto-update artifacts (stapled app, signed with the updater key) ──────
@@ -121,4 +123,4 @@ rm -rf "$WORK"
 
 echo "Released $TAG"
 echo "  brew install --cask mdenizay/tap/dotify"
-echo "  brew install mdenizay/tap/dotify-cli"
+echo "  brew install mdenizay/tap/dotify-cli   # dotify and dotify-mcp"
