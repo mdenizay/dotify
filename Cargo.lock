@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-cli"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "clap",
  "dotify-core",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "png",
  "serde",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-desktop"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "dotify-core",
  "dotify-export",
@@ -914,7 +914,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-export"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "dotify-core",
  "gif",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "dotify-mcp"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "axum",
  "base64 0.22.1",
