@@ -69,6 +69,11 @@ export const engine = {
   paletteSave: (palette: Palette) => invoke<LibraryPalette[]>("palette_save", { palette }),
   paletteDelete: (name: string) => invoke<LibraryPalette[]>("palette_delete", { name }),
   paletteExport: (palette: Palette) => invoke<string | null>("palette_export", { palette }),
+  /** Native image picker; the path becomes readable through `referenceLoad`. */
+  referencePick: () => invoke<string | null>("reference_pick"),
+  async referenceLoad(path: string): Promise<ArrayBuffer> {
+    return invoke<ArrayBuffer>("reference_load", { path });
+  },
   recoveryStatus: () => invoke<RecoveryInfo | null>("recovery_status"),
   recoveryRestore: () => invoke<SessionView>("recovery_restore"),
   recoveryDiscard: () => invoke<null>("recovery_discard"),

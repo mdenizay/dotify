@@ -14,6 +14,7 @@ import type { FrameStore } from "./FrameStore";
 import { ONION_TINTS, onionFrames } from "./onion";
 import type { Player } from "./playback";
 import { brushOffsets } from "./raster";
+import { referenceImages } from "./reference";
 import { drawRulers, RULER_SIZE } from "./rulers";
 import { createTools, type Tool, type ToolHost, type ToolInput } from "./tools";
 import { center, fit, nextZoom, scaleOf, toCanvas, zoomAt, type Viewport } from "./viewport";
@@ -48,6 +49,7 @@ export class CanvasView implements ToolHost {
   private spaceDown = false;
   private altDown = false;
   private hover: { x: number; y: number } | null = null;
+  private moveRef: { pointer: number; x: number; y: number; rx: number; ry: number } | null = null;
   private pinchAcc = 0;
   private colors = {
     workspace: "#111214",
@@ -114,6 +116,8 @@ export class CanvasView implements ToolHost {
           s.session !== p.session ||
           s.showGrid !== p.showGrid ||
           s.showRulers !== p.showRulers ||
+          s.reference !== p.reference ||
+          s.referenceMoving !== p.referenceMoving ||
           s.symmetryX !== p.symmetryX ||
           s.symmetryY !== p.symmetryY ||
           s.symmetryMode !== p.symmetryMode ||
@@ -131,6 +135,7 @@ export class CanvasView implements ToolHost {
         }
       }),
     );
+    this.disposers.push(referenceImages.onLoad(() => this.invalidate()));
     // Pixels under the cursor can change without the pointer moving.
     this.disposers.push(this.cache.onChange(() => this.updateStatus()));
     this.disposers.push(deps.frames.onChange(() => this.invalidate()));
@@ -307,6 +312,7 @@ export class CanvasView implements ToolHost {
     ctx.fillStyle = pattern;
     ctx.fillRect(vp.ox, vp.oy, w, h);
 
+    this.drawReference(false, w, h);
     ctx.imageSmoothingEnabled = false;
     const { frames, player } = this.deps;
     const playing = player.playing ? summary.frames[player.index] : undefined;
@@ -318,6 +324,7 @@ export class CanvasView implements ToolHost {
       this.drawLayers(summary.layers, s, w, h);
     }
     ctx.globalAlpha = 1;
+    this.drawReference(true, w, h);
 
     if (s.showGrid && scale >= 6) this.drawGrid(summary.width, summary.height, scale);
 
@@ -339,6 +346,34 @@ export class CanvasView implements ToolHost {
         accentText: this.colors.accentText,
       });
     }
+  }
+
+  /**
+   * The reference image, clipped to the canvas. Smoothed, since it is usually
+   * a photo or sketch rather than pixel art.
+   */
+  private drawReference(onTop: boolean, w: number, h: number) {
+    const r = getEditor().reference;
+    if (!r || !r.visible || r.onTop !== onTop) return;
+    const img = referenceImages.get(r.path);
+    if (!img) return;
+    const { ctx, vp } = this;
+    const k = scaleOf(vp);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(vp.ox, vp.oy, w, h);
+    ctx.clip();
+    ctx.globalAlpha = r.opacity / 100;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      img,
+      vp.ox + r.x * k,
+      vp.oy + r.y * k,
+      img.naturalWidth * r.scale * k,
+      img.naturalHeight * r.scale * k,
+    );
+    ctx.restore();
   }
 
   /** Dashed lines through the canvas centre for each active symmetry axis. */
@@ -483,11 +518,13 @@ export class CanvasView implements ToolHost {
 
   private updateCursor() {
     const tool = this.currentToolId();
-    this.canvas.style.cursor = this.pan
-      ? "grabbing"
-      : this.spaceDown || tool === "hand"
-        ? "grab"
-        : "crosshair";
+    const moving = getEditor().referenceMoving && getEditor().reference;
+    this.canvas.style.cursor =
+      this.pan || this.moveRef
+        ? "grabbing"
+        : this.spaceDown || tool === "hand" || moving
+          ? "grab"
+          : "crosshair";
   }
 
   private pixelAt(e: PointerEvent | WheelEvent) {
@@ -521,6 +558,13 @@ export class CanvasView implements ToolHost {
     }
     if (e.button !== 0 && e.button !== 2) return;
     if (this.overRuler(e)) return;
+    const ref = getEditor().reference;
+    if (e.button === 0 && ref && getEditor().referenceMoving) {
+      this.moveRef = { pointer: e.pointerId, x: e.clientX, y: e.clientY, rx: ref.x, ry: ref.y };
+      this.canvas.setPointerCapture(e.pointerId);
+      this.updateCursor();
+      return;
+    }
     const impl = this.tools[tool];
     if (!impl) return;
     this.deps.stopPlayback();
@@ -531,6 +575,19 @@ export class CanvasView implements ToolHost {
   }
 
   private onPointerMove(e: PointerEvent) {
+    const ref = getEditor().reference;
+    if (this.moveRef && ref && e.pointerId === this.moveRef.pointer) {
+      // Pointer delta in canvas pixels.
+      const k = this.vp.dpr / scaleOf(this.vp);
+      setEditor({
+        reference: {
+          ...ref,
+          x: this.moveRef.rx + (e.clientX - this.moveRef.x) * k,
+          y: this.moveRef.ry + (e.clientY - this.moveRef.y) * k,
+        },
+      });
+      return;
+    }
     if (this.pan && e.pointerId === this.pan.pointer) {
       const dpr = this.vp.dpr;
       this.setViewport({
@@ -549,6 +606,11 @@ export class CanvasView implements ToolHost {
   }
 
   private onPointerUp(e: PointerEvent) {
+    if (this.moveRef && e.pointerId === this.moveRef.pointer) {
+      this.moveRef = null;
+      this.updateCursor();
+      return;
+    }
     if (this.pan && e.pointerId === this.pan.pointer) {
       this.pan = null;
       this.updateCursor();

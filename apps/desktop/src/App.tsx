@@ -16,6 +16,7 @@ import { LayerActions, LayersPanel } from "./components/LayersPanel";
 import { LibraryPanel } from "./components/LibraryPanel";
 import { PaletteActions, PalettePanel } from "./components/PalettePanel";
 import { PreviewActions, PreviewPanel } from "./components/PreviewPanel";
+import { ReferenceActions, ReferencePanel } from "./components/ReferencePanel";
 import { StatusBar } from "./components/StatusBar";
 import { TagDialog } from "./components/TagDialog";
 import { Timeline } from "./components/Timeline";
@@ -64,7 +65,7 @@ function OverviewHost() {
 
 function RightPanel() {
   const width = useEditor((s) => s.rightPanelWidth);
-  const [open, setOpen] = useState({ color: true, palette: true, layers: true });
+  const [open, setOpen] = useState({ color: true, palette: true, reference: true, layers: true });
   const toggle = (k: keyof typeof open) => () => setOpen((o) => ({ ...o, [k]: !o[k] }));
   // Persisted, because closing the preview also stops its playback.
   const previewOpen = useEditor((s) => s.previewOpen);
@@ -112,6 +113,14 @@ function RightPanel() {
         actions={<PaletteActions />}
       >
         <PalettePanel />
+      </Section>
+      <Section
+        title="Reference"
+        open={open.reference}
+        onToggle={toggle("reference")}
+        actions={<ReferenceActions />}
+      >
+        <ReferencePanel />
       </Section>
       <Section
         title="Layers"

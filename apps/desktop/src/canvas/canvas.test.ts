@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { blendOver, hsvaToRgba, parseHex, rgbaToHsva, toHex } from "./color";
 import { boxFrom, brushOffsets, ellipse, line, rectangle } from "./raster";
+import { fitReference, rescaleAround } from "./reference";
 import { labelledCells, rulerStep } from "./rulers";
 import { fit, nextZoom, scaleOf, toCanvas, zoomAt } from "./viewport";
 
@@ -130,5 +131,20 @@ describe("rulers", () => {
     expect(labelledCells(48, 8)).toEqual([1, 8, 16, 24, 32, 40, 48]);
     expect(labelledCells(10, 4)).toEqual([1, 4, 8, 10]);
     expect(labelledCells(1, 1)).toEqual([1]);
+  });
+});
+
+describe("reference image", () => {
+  it("fits inside the canvas, centred", () => {
+    expect(fitReference(200, 100, 32, 32)).toEqual({ scale: 0.16, x: 0, y: 8 });
+    expect(fitReference(10, 40, 64, 32)).toEqual({ scale: 0.8, x: 28, y: 0 });
+  });
+
+  it("rescales around the image centre", () => {
+    const r = { x: 0, y: 8, scale: 0.16 };
+    const bigger = rescaleAround(r, 200, 100, 0.32);
+    expect(bigger.scale).toBe(0.32);
+    expect(bigger.x + (200 * 0.32) / 2).toBeCloseTo(16);
+    expect(bigger.y + (100 * 0.32) / 2).toBeCloseTo(16);
   });
 });

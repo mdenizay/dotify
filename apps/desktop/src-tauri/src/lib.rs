@@ -1,6 +1,7 @@
 mod commands;
 mod menu;
 mod palettes;
+mod reference;
 mod session;
 
 use tauri::{Emitter, Manager};
@@ -22,6 +23,7 @@ pub fn run() {
             let recovery_dir = app.path().app_data_dir()?.join("recovery");
             app.manage(AppState::new(recovery_dir));
             app.manage(palettes::PaletteStore::new(app.path().app_data_dir()?.join("palettes.json")));
+            app.manage(reference::ReferenceStore::new(app.path().app_data_dir()?.join("references.json")));
             let handle = app.handle().clone();
             std::thread::Builder::new().name("autosave".into()).spawn(move || loop {
                 std::thread::sleep(AUTOSAVE_INTERVAL);
@@ -57,6 +59,8 @@ pub fn run() {
             palettes::palette_save,
             palettes::palette_delete,
             palettes::palette_export,
+            reference::reference_pick,
+            reference::reference_load,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Dotify");

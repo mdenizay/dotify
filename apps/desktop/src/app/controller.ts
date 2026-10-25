@@ -7,6 +7,12 @@ import type { CanvasView } from "../canvas/CanvasView";
 import { FrameStore } from "../canvas/FrameStore";
 import type { OverviewView } from "../canvas/OverviewView";
 import { Player, resolveRange } from "../canvas/playback";
+import {
+  fitReference,
+  loadReferenceSettings,
+  referenceImages,
+  saveReferenceSettings,
+} from "../canvas/reference";
 import { engine, errorMessage } from "../engine/bridge";
 import type {
   ArtboardId,
@@ -18,6 +24,11 @@ import type {
   SessionView,
 } from "../engine/types";
 import { getEditor, selectFrames, setEditor, toast, useEditor, type Mode } from "../state/editor";
+
+/** Where a project's reference image settings are remembered. */
+function referenceKey(view: SessionView) {
+  return `${view.path ?? `unsaved:${view.project.name}`}#${view.active_artboard}`;
+}
 
 /** Neutral mid-gray that reads on both themes and on most palettes. */
 const SILHOUETTE_COLOR = "#8a8f98ff";
@@ -84,6 +95,13 @@ class Controller {
     const recovery = await engine.recoveryStatus();
     if (recovery) setEditor({ recovery });
     await listen<string>("menu", (e) => void this.menu(e.payload));
+    // Remember the reference per project and artboard (also after Save As).
+    useEditor.subscribe((st, prev) => {
+      if (!st.session) return;
+      const key = referenceKey(st.session);
+      if (st.reference !== prev.reference || (prev.session && key !== referenceKey(prev.session)))
+        saveReferenceSettings(key, st.reference);
+    });
     await getCurrentWindow().onCloseRequested(async (e) => {
       if (!(await this.confirmDiscard())) {
         e.preventDefault();
@@ -123,6 +141,7 @@ class Controller {
     if (switched) {
       this.player.pause();
       setEditor({ playTag: null, frameAnchor: null, tagDialog: null });
+      this.loadReference(view);
     } else {
       // Drop references to tags and frames that no longer exist.
       const s2 = getEditor();
@@ -136,6 +155,32 @@ class Controller {
     if (reset) this.overview?.fitToWindow();
     if (switched && getEditor().previewPlaying && getEditor().previewOpen) this.startPreview();
   }
+
+  /** Show the reference image remembered for this project and artboard. */
+  private loadReference(view: SessionView) {
+    const reference = loadReferenceSettings(referenceKey(view));
+    setEditor({ reference, referenceMoving: false });
+    if (reference) {
+      referenceImages.load(reference.path).catch((e) => {
+        toast(`Reference image unavailable: ${errorMessage(e)}`, "error");
+        setEditor({ reference: null });
+      });
+    }
+  }
+
+  /** Pick a reference image and fit it to the canvas. */
+  addReference = async () => {
+    const path = await this.guard(() => engine.referencePick());
+    if (!path) return;
+    const img = await this.guard(() => referenceImages.load(path));
+    const summary = getEditor().session?.summary;
+    if (!img || !summary) return;
+    const fit = fitReference(img.naturalWidth, img.naturalHeight, summary.width, summary.height);
+    setEditor({
+      reference: { path, visible: true, onTop: false, opacity: 50, ...fit },
+      referenceMoving: false,
+    });
+  };
 
   /** Read every layer of the active frame from the engine. */
   private async loadFrame() {

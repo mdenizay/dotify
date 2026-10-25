@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
+import type { ReferenceSettings } from "../canvas/reference";
 import type { OnionSkin } from "../canvas/onion";
 import type { PlayMode } from "../canvas/playback";
 import type {
@@ -65,6 +66,10 @@ export interface EditorState extends Prefs {
   symmetryX: boolean;
   symmetryY: boolean;
   symmetryMode: SymmetryMode;
+  /** Reference image for the open project (see canvas/reference.ts). */
+  reference: ReferenceSettings | null;
+  /** Dragging on the canvas moves the reference instead of drawing. */
+  referenceMoving: boolean;
   /** Mirrors the canvas view; written by CanvasView only. */
   zoom: number;
   cursor: { x: number; y: number; color: Hex | null } | null;
@@ -130,6 +135,8 @@ export const useEditor = create<EditorState>()(() => ({
   symmetryX: false,
   symmetryY: false,
   symmetryMode: "paint",
+  reference: null,
+  referenceMoving: false,
   zoom: 1,
   cursor: null,
   opacityPreview: null,
