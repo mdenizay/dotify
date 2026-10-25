@@ -84,7 +84,7 @@ fn stdio_session() {
 
     let created = s.call("project_create", json!({ "width": 8, "height": 8, "name": "Hero", "path": "hero.dotify" }));
     assert_eq!(created["isError"], false);
-    let summary = &created["structuredContent"]["summary"];
+    let summary = &created["structuredContent"]["summary"]["artboards"][0];
     let p = created["structuredContent"]["project"].as_str().unwrap().to_string();
     let (layer, frame) = (summary["layers"][0]["id"].clone(), summary["frames"][0]["id"].clone());
 
@@ -113,9 +113,9 @@ fn stdio_session() {
 
     let saved = s.call("project_save", json!({ "project": p }));
     assert_eq!(saved["isError"], false, "{saved}");
-    let doc = dotify_core::format::load(&root.path().join("hero.dotify")).unwrap();
-    assert_eq!(doc.name(), "Hero");
-    assert_eq!(doc.cels().count(), 1);
+    let project = dotify_core::format::load(&root.path().join("hero.dotify")).unwrap();
+    assert_eq!(project.name(), "Hero");
+    assert_eq!(project.artboards()[0].document().cels().count(), 1);
 
     let outside = s.call("project_open", json!({ "path": "/etc/hosts" }));
     assert_eq!(outside["structuredContent"]["error"]["code"], "path_outside_roots");

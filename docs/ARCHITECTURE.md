@@ -29,9 +29,10 @@ architecture changes.
 dotify/
 ├── Cargo.toml                  Rust workspace
 ├── crates/
-│   ├── dotify-core/            Document model, commands, history, compositing,
-│   │                           PNG codec, .dotify format (read/write/migrate)
-│   ├── dotify-export/          PNG, spritesheet + JSON metadata, GIF, Godot 4
+│   ├── dotify-core/            Document and project model, commands, history,
+│   │                           compositing, PNG codec, .dotify format
+│   ├── dotify-export/          PNG, spritesheet + JSON metadata, GIF, Godot 4,
+│   │                           batch export of all artboards
 │   ├── dotify-cli/             Headless project manipulation and export
 │   └── dotify-mcp/             MCP server (stdio + Streamable HTTP)
 ├── apps/desktop/               Tauri + React application
@@ -93,6 +94,20 @@ of cel pixels that it refreshes from the engine after every change.
   iteration. A missing cel means "fully transparent". In memory every cel is
   canvas-sized; on disk cels are trimmed to their non-transparent bounds.
 - Colors serialize as `#rrggbbaa` hex strings.
+
+### Projects and artboards (`project/`)
+
+A `Project` is the unit a `.dotify` file stores: an ordered library of
+`Artboard`s (each wraps a `Document` plus an `ArtboardId` and an optional
+`FolderId`), a flat list of `Folder`s and one palette shared by every
+artboard. `ProjectCommand` adds library commands (`create_artboard`,
+`rename_artboard`, `duplicate_artboard`, `delete_artboard`, `move_artboard`,
+folder commands, `set_palette`, `rename_project`) and `edit`, which runs any
+document `Command` on one artboard. `ProjectEditor` is the project-level
+`Editor`: one history for the whole project, atomic batches across
+artboards, revision checks. Document `Op`s are reused inside
+`ProjectOp::Document`, so drawing undo stays bit-exact. See
+[`LIBRARY.md`](LIBRARY.md).
 
 ### Commands (`command.rs`)
 
@@ -179,6 +194,10 @@ nearest-neighbour; nothing is resampled or quantized.
 - `godot.rs` – Godot 4 `SpriteFrames` `.tres` (one `AtlasTexture` per used
   cell, one animation per tag, `speed = 1000 / gcd(durations)`), written
   together with the sheet PNG and JSON.
+- `project.rs` – export every artboard of a project in one go: `plan` lays
+  artboards out as `<folder>/<name>` with safe, de-duplicated names and each
+  goes through an `ArtboardExporter` (`PngArtboardExporter`,
+  `GodotArtboardExporter`; new formats implement the trait).
 
 ## dotify-mcp
 
@@ -186,15 +205,17 @@ A Model Context Protocol server built on the official Rust SDK (`rmcp`). See
 [`MCP.md`](MCP.md) for setup and the tool list.
 
 - `tools.rs` – `Dotify`, the transport-independent tool set: open projects
-  (`Workspace`, handles `p1`, `p2`, …, each an `Editor` plus its file path),
-  argument parsing, confirmation and overwrite checks, exports. Edit tools
-  compile to one `Command` and run through `Editor::execute_expecting`, so
-  each call (or `batch`) is one undoable transaction with an optional
-  revision check.
+  (`Workspace`, handles `p1`, `p2`, …, each a `ProjectEditor` plus its file
+  path), argument parsing, artboard resolution (an omitted `artboard` means
+  the only one; with several it is an `artboard_required` error),
+  confirmation and overwrite checks, exports. Edit tools compile to one
+  `ProjectCommand` (`edit` for artboard commands) and run through
+  `ProjectEditor::execute_expecting`, so each call (or `batch`) is one
+  undoable transaction with an optional revision check.
 - `args.rs` – the tools' argument types with their JSON Schemas (schemars).
-  They mirror `Command` rather than adding schema derives to the core;
-  `EditOp::into_command` is the only mapping. `batch` takes a list of
-  `EditOp`s named like the single edit tools.
+  They mirror `Command` / `ProjectCommand` rather than adding schema derives
+  to the core; `EditOp::into_command` is the only mapping. `batch` takes a
+  list of `EditOp`s named like the single edit tools.
 - `sandbox.rs` – every path goes through `Sandbox`: canonicalized, required
   to stay inside a `--root`, extension-checked.
 - `server.rs` – rmcp `ServerHandler`: lists tools (minus writing tools in
@@ -218,13 +239,16 @@ renamed into place.
 
 ### Rust side (`apps/desktop/src-tauri`)
 
-- Holds one `Editor` in a `Mutex` as Tauri managed state, plus the current
-  file path.
+- Holds one `ProjectEditor` in a `Mutex` as Tauri managed state, plus the
+  current file path and the active artboard.
 - IPC commands: `doc_new`, `doc_open`, `doc_save`, `doc_save_as`,
-  `doc_summary`, `execute`, `undo`, `redo`, `read_cel`, `read_frame` (an
-  engine-composited frame), `export_png`, `export_sheet`, `export_gif`,
-  `export_godot`, and recovery commands. `read_cel` returns raw RGBA bytes through
-  `tauri::ipc::Response` (no JSON/base64 overhead).
+  `doc_view`, `execute` (a `ProjectCommand`), `undo`, `redo`,
+  `artboard_activate`, `read_cel`, `read_frame` (an engine-composited frame
+  of the active artboard), `artboard_composite`, `export_png`,
+  `export_all`, `export_sheet`, `export_gif`, `export_godot`, and
+  recovery commands. Single-artboard exports use the active artboard.
+  `read_cel`, `read_frame` and `artboard_composite` return raw RGBA bytes
+  through `tauri::ipc::Response` (no JSON/base64 overhead).
 - File dialogs are opened **from Rust**, so the webview never supplies
   arbitrary filesystem paths to the backend. The webview has no filesystem
   permissions.
@@ -265,16 +289,25 @@ renamed into place.
   cache always converges to the authoritative state. All engine calls go
   through one promise queue in `app/controller.ts`, keeping commands and
   read-backs strictly ordered.
+- `canvas/OverviewView.ts` – the artboard overview: every artboard side by
+  side (flow layout per folder from `overviewLayout.ts`), pan/zoom, click to
+  select, double-click to edit. Artboard composites come from
+  `ArtboardImages`, a debounced cache shared with the library thumbnails.
+- `components/LibraryPanel.tsx` – library sidebar: search, folders, drag and
+  drop, native context menus.
 - `state/` – Zustand stores for tool settings, colors, document summary,
-  active layer/frame, and UI preferences. Components subscribe with narrow
-  selectors to avoid re-renders.
+  active layer/frame, mode (editor/overview) and UI preferences. Components
+  subscribe with narrow selectors to avoid re-renders.
 
 ## Testing strategy
 
 - `dotify-core`: unit tests for raster algorithms, flood fill, compositing,
   every command, undo/redo round trips, batch atomicity, revision checking and
   format round trips/corruption detection.
-- `dotify-export`: PNG export pixel equality and scaling; spritesheet
+- `dotify-core` projects: every library command with undo/redo, palette
+  sharing, cross-artboard batches; v1 → v2 → v3 migrations against JSON and real
+  `.dotify` fixtures.
+- `dotify-export`: PNG export pixel equality and scaling; batch export layout; spritesheet
   layouts, padding and extrusion; GIF round trips (colors, delays, loop,
   per-frame palettes); a snapshot of the Godot `.tres`
   (`tests/snapshots/hero.tres`, refresh with `DOTIFY_UPDATE_SNAPSHOTS=1`).
@@ -283,7 +316,8 @@ renamed into place.
   confirmations, read-only mode, every tool against a temp root, HTTP token
   and host checks, and an end-to-end JSON-RPC session with the binary over
   stdio.
-- Frontend: Vitest tests for rasterisers and view math.
+- Frontend: Vitest tests for rasterisers, view math, overview layout and
+  library drag-and-drop targets.
 
 ## Roadmap
 

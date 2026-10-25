@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use dotify_core::Editor;
+use dotify_core::ProjectEditor;
 
 use crate::error::{ToolError, ToolResult};
 
@@ -9,7 +9,7 @@ use crate::error::{ToolError, ToolResult};
 pub const MAX_OPEN_PROJECTS: usize = 32;
 
 pub struct OpenProject {
-    pub editor: Editor,
+    pub editor: ProjectEditor,
     /// The project's `.dotify` file, once it has one.
     pub path: Option<PathBuf>,
 }

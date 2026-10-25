@@ -15,9 +15,10 @@ use crate::tools::{Dotify, ToolDef, ToolOutput};
 
 const INSTRUCTIONS: &str = "\
 Dotify is a pixel art and sprite animation editor. Typical flow: project_list or project_open / \
-project_create to get a project handle, project_get for layer and frame IDs, then edit with the \
-drawing, layer, frame and tag tools (or several edits at once with batch), look at the result with \
-get_canvas, and finish with project_save and an export (export_godot for Godot 4). \
+project_create to get a project handle, project_get for its artboards (sprites) and their layer and \
+frame IDs, then edit with the drawing, layer, frame and tag tools (or several edits at once with \
+batch), look at the result with get_canvas, and finish with project_save and an export (export_godot \
+for Godot 4). A project holds one or more artboards; pass `artboard` when it has more than one. \
 Colors are #rrggbbaa (or #rrggbb) and replace pixels; (0,0) is the top-left pixel. Every edit call is \
 one undoable step (undo / redo); pass expected_revision to make sure nobody edited in between. \
 Tools that delete layers or frames, replace existing files or discard unsaved changes need confirm: true. \

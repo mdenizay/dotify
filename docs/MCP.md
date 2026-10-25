@@ -34,14 +34,15 @@ cargo install --path crates/dotify-mcp
   root, including through `..` or a symlink, fails with `path_outside_roots`.
   Relative paths start at the first root. Projects must end in `.dotify`,
   exports in `.png`/`.gif`.
-- **Confirmation.** Tools that delete layers or frames (`layer_delete`,
-  `delete_frame`, or a `batch` containing them), replace an existing file
+- **Confirmation.** Tools that delete artboards, layers or frames
+  (`artboard_delete`, `layer_delete`, `delete_frame`, or a `batch` containing
+  them), replace an existing file
   (saving over another file, any export onto existing files) or close a project
   with unsaved changes fail with `confirmation_required` unless called with
   `confirm: true`. Saving a project to its own file needs no confirmation.
 - **Read-only mode.** `--read-only` (or `DOTIFY_MCP_READ_ONLY=true`) offers
   only the reading tools: `project_list`, `project_open`, `project_get`,
-  `project_close`, `layer_list` and `get_canvas`.
+  `project_close`, `artboard_list`, `layer_list` and `get_canvas`.
 - **HTTP.** The HTTP transport listens on `127.0.0.1:8765` by default and
   requires a bearer token of at least 24 characters (`dotify-mcp token` prints
   a random one). Requests with an unexpected `Host` header are rejected
@@ -143,23 +144,31 @@ it runs. To revoke access, restart the server with a new token.
 ## Tools
 
 All tools take JSON arguments described by their JSON Schema (`tools/list`).
-Unknown fields are rejected. Layers and frames are addressed by their stable
-IDs from `project_get`, never by position.
+Unknown fields are rejected. Artboards, layers and frames are addressed by
+their stable IDs from `project_get`, never by position.
+
+A project is a library of artboards: separate sprites, each with its own
+size, layers, frames and tags, sharing one palette. Every tool that reads or
+edits pixels, layers, frames or tags, and every export, takes an optional
+`artboard`. Leave it out when the project has a single artboard. With several
+artboards, leaving it out fails with `artboard_required`, and the error's
+`details.artboards` lists the artboards to choose from.
 
 | Tool | Does |
 |------|------|
 | `project_list` | Open projects and `.dotify` files under the roots |
 | `project_create` | New project (optionally saved to a path); returns its handle (`p1`, …) |
 | `project_open` | Open a `.dotify` file; opening the same file again returns the same handle |
-| `project_get` | Size, layers, frames, palette, tags, revision, unsaved changes, undo state |
+| `project_get` | Artboards (size, layers, frames, tags), folders, shared palette, revision, unsaved changes, undo state |
 | `project_save` | Save to its file or a new path |
 | `project_close` | Close a project |
+| `artboard_list`, `artboard_create`, `artboard_rename`, `artboard_duplicate`, `artboard_delete` | Artboards (sprites) in the project library |
 | `get_canvas` | A frame (or one layer) as a PNG image; `include_pixels` adds the exact pixels as text rows |
 | `set_pixels`, `draw_line`, `draw_rectangle`, `draw_ellipse`, `fill_region`, `replace_color` | Drawing |
 | `layer_list`, `layer_create`, `layer_update`, `layer_delete` | Layers |
 | `add_frame`, `duplicate_frame`, `delete_frame`, `move_frame`, `set_frame_duration`, `copy_frame`, `copy_silhouette` | Frames |
 | `tag_create`, `tag_update`, `tag_delete` | Animation tags |
-| `set_palette` | Document palette |
+| `set_palette` | Palette shared by all artboards |
 | `batch` | Several edits as one atomic undo step |
 | `undo`, `redo` | History |
 | `export_png`, `export_gif`, `export_spritesheet`, `export_godot` | Exports, same options as the CLI |
@@ -170,11 +179,13 @@ refuse the edit if the project changed since you last looked
 (`revision_mismatch`).
 
 `batch` takes `ops`, each an object with `op` set to an edit tool name and that
-tool's arguments without `project`:
+tool's arguments without `project`. The batch's `artboard` is the default for
+ops that don't name one:
 
 ```json
 {
   "project": "p1",
+  "artboard": 1,
   "label": "Draw hero",
   "ops": [
     { "op": "layer_create", "name": "Outline" },
@@ -195,14 +206,15 @@ body the model can act on:
 { "error": { "code": "layer_locked", "message": "layer 3 is locked" } }
 ```
 
-Engine errors keep `CoreError::code()` (`layer_not_found`, `frame_not_found`,
-`layer_locked`, `tag_not_found`, `last_layer`, `last_frame`,
-`invalid_canvas_size`, `invalid_argument`, `revision_mismatch`), and export and
-file errors keep theirs (`too_many_colors`, `invalid_scale`, `not_dotify`,
-`corrupt_file`, …). The server adds `invalid_arguments` (arguments don't match
-the schema), `project_not_found`, `path_outside_roots`, `invalid_path`,
-`not_found`, `confirmation_required`, `read_only`, `no_path`, `project_open`,
-`too_many_projects`, `too_large` and `io_error`.
+Engine errors keep `CoreError::code()` (`artboard_not_found`, `last_artboard`,
+`layer_not_found`, `frame_not_found`, `layer_locked`, `tag_not_found`,
+`last_layer`, `last_frame`, `invalid_canvas_size`, `invalid_argument`,
+`revision_mismatch`), and export and file errors keep theirs
+(`too_many_colors`, `invalid_scale`, `not_dotify`, `corrupt_file`, …). The
+server adds `invalid_arguments` (arguments don't match the schema),
+`artboard_required`, `project_not_found`, `path_outside_roots`,
+`invalid_path`, `not_found`, `confirmation_required`, `read_only`, `no_path`,
+`project_open`, `too_many_projects`, `too_large` and `io_error`.
 
 ## Limits
 

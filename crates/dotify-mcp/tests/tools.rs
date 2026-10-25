@@ -39,8 +39,8 @@ impl Fixture {
     fn project(&self) -> (String, u64, u64) {
         let v = self.ok("project_create", json!({ "width": 4, "height": 4, "path": "art.dotify" }));
         let id = v["project"].as_str().unwrap().to_string();
-        let layer = v["summary"]["layers"][0]["id"].as_u64().unwrap();
-        let frame = v["summary"]["frames"][0]["id"].as_u64().unwrap();
+        let layer = v["summary"]["artboards"][0]["layers"][0]["id"].as_u64().unwrap();
+        let frame = v["summary"]["artboards"][0]["frames"][0]["id"].as_u64().unwrap();
         (id, layer, frame)
     }
 }
@@ -154,13 +154,13 @@ fn batch_is_atomic_and_one_undo_step() {
     assert_eq!(r["label"], "Hero");
     assert_eq!(r["created"].as_array().unwrap().len(), 2);
     let s = f.ok("project_get", json!({ "project": p }))["summary"].clone();
-    assert_eq!(s["layers"].as_array().unwrap().len(), 2);
-    assert_eq!(s["tags"][0]["direction"], "ping_pong");
+    assert_eq!(s["artboards"][0]["layers"].as_array().unwrap().len(), 2);
+    assert_eq!(s["artboards"][0]["tags"][0]["direction"], "ping_pong");
     assert_eq!(s["undo_label"], "Hero");
     f.ok("undo", json!({ "project": p }));
     let s = f.ok("project_get", json!({ "project": p }))["summary"].clone();
-    assert_eq!(s["layers"].as_array().unwrap().len(), 1);
-    assert_eq!(s["frames"].as_array().unwrap().len(), 1);
+    assert_eq!(s["artboards"][0]["layers"].as_array().unwrap().len(), 1);
+    assert_eq!(s["artboards"][0]["frames"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -201,8 +201,8 @@ fn saving_never_silently_overwrites_other_files() {
     let r = f.ok("project_save", json!({ "project": p }));
     assert_eq!(r["revision"], 1);
     assert_eq!(f.ok("project_get", json!({ "project": p }))["summary"]["dirty"], false);
-    let doc = format::load(&f.root.path().join("art.dotify")).unwrap();
-    assert_eq!(doc.cels().count(), 1);
+    let project = format::load(&f.root.path().join("art.dotify")).unwrap();
+    assert_eq!(project.artboards()[0].document().cels().count(), 1);
 
     let e = f.err("project_save", json!({ "project": p, "path": "other.dotify" }));
     assert_eq!(e.code, "confirmation_required");
@@ -227,8 +227,8 @@ fn file_access_is_limited_to_roots() {
     let f = fixture(false);
     let outside = tempfile::tempdir().unwrap();
     let secret = outside.path().join("secret.dotify");
-    let doc = dotify_core::Document::new("s", 2, 2).unwrap();
-    format::save(&doc, &secret, Default::default()).unwrap();
+    let project = dotify_core::Project::new("s", 2, 2).unwrap();
+    format::save(&project, &secret, Default::default()).unwrap();
     let s = secret.to_str().unwrap();
     assert_eq!(f.err("project_open", json!({ "path": s })).code, "path_outside_roots");
     let name = outside.path().file_name().unwrap().to_str().unwrap();
@@ -283,8 +283,8 @@ fn read_only_mode_offers_only_reading_tools() {
     let names: Vec<&str> = f.dotify.tools().map(|t| t.name).collect();
     assert!(names.contains(&"project_open") && names.contains(&"get_canvas"));
     assert!(!names.contains(&"draw_line") && !names.contains(&"project_save") && !names.contains(&"export_png"));
-    let doc = dotify_core::Document::new("r", 2, 2).unwrap();
-    format::save(&doc, &f.root.path().join("r.dotify"), Default::default()).unwrap();
+    let project = dotify_core::Project::new("r", 2, 2).unwrap();
+    format::save(&project, &f.root.path().join("r.dotify"), Default::default()).unwrap();
     let p = f.ok("project_open", json!({ "path": "r.dotify" }))["project"].as_str().unwrap().to_string();
     let again = f.ok("project_open", json!({ "path": "r.dotify" }));
     assert_eq!(again["project"], p);
@@ -293,4 +293,87 @@ fn read_only_mode_offers_only_reading_tools() {
     let e = f.err("draw_line", json!({ "project": p }));
     assert_eq!(e.code, "read_only");
     assert_eq!(f.err("project_create", json!({ "width": 2, "height": 2 })).code, "read_only");
+}
+
+#[test]
+fn artboards() {
+    let f = fixture(false);
+    let (p, l, fr) = f.project();
+    let first = f.ok("artboard_list", json!({ "project": p }))["artboards"][0]["id"].as_u64().unwrap();
+    // One artboard: `artboard` may be left out.
+    f.ok(
+        "set_pixels",
+        json!({ "project": p, "layer": l, "frame": fr, "pixels": [{ "x": 0, "y": 0, "color": "#f00" }] }),
+    );
+
+    let r = f.ok("artboard_create", json!({ "project": p, "name": "Enemy", "width": 2, "height": 3 }));
+    let second = r["created"][0]["artboard"].as_u64().unwrap();
+    let summary = f.ok("project_get", json!({ "project": p }))["summary"].clone();
+    let ab = &summary["artboards"][1];
+    assert_eq!((ab["name"].as_str(), ab["width"].as_u64(), ab["height"].as_u64()), (Some("Enemy"), Some(2), Some(3)));
+    let (l2, f2) = (ab["layers"][0]["id"].as_u64().unwrap(), ab["frames"][0]["id"].as_u64().unwrap());
+
+    // Now it is ambiguous.
+    let e = f.err("set_pixels", json!({ "project": p, "layer": l, "frame": fr, "pixels": [] }));
+    assert_eq!(e.code, "artboard_required");
+    assert_eq!(e.details.unwrap()["artboards"].as_array().unwrap().len(), 2);
+    assert_eq!(f.err("get_canvas", json!({ "project": p })).code, "artboard_required");
+    assert_eq!(f.err("layer_list", json!({ "project": p })).code, "artboard_required");
+    assert_eq!(f.err("get_canvas", json!({ "project": p, "artboard": 999 })).code, "artboard_not_found");
+
+    f.ok(
+        "fill_region",
+        json!({ "project": p, "artboard": second, "layer": l2, "frame": f2, "x": 0, "y": 0, "color": "#0f0" }),
+    );
+    let c = f.ok("get_canvas", json!({ "project": p, "artboard": second, "include_pixels": true }));
+    assert_eq!(c["pixels"]["rows"], json!(["00", "00", "00"]));
+    let c = f.ok("get_canvas", json!({ "project": p, "artboard": first, "include_pixels": true }));
+    assert_eq!(c["pixels"]["rows"][0], "0...");
+
+    // Batch: a default artboard plus per-op overrides, one undo step.
+    let r = f.ok("batch", json!({ "project": p, "artboard": second, "ops": [
+        { "op": "set_pixels", "layer": l2, "frame": f2, "pixels": [{ "x": 0, "y": 0, "color": "#00f" }] },
+        { "op": "set_pixels", "artboard": first, "layer": l, "frame": fr, "pixels": [{ "x": 3, "y": 3, "color": "#00f" }] },
+        { "op": "artboard_rename", "artboard": second, "name": "Slime" },
+    ]}));
+    assert_eq!(r["artboards"].as_array().unwrap().len(), 2, "{r}");
+    assert_eq!(f.ok("artboard_list", json!({ "project": p }))["artboards"][1]["name"], "Slime");
+    let e = f.err("batch", json!({ "project": p, "ops": [{ "op": "add_frame" }] }));
+    assert_eq!(e.code, "artboard_required");
+    assert!(e.message.starts_with("ops[0]"), "{}", e.message);
+
+    let dup = f.ok("artboard_duplicate", json!({ "project": p, "artboard": second }))["created"][0]["artboard"]
+        .as_u64()
+        .unwrap();
+    f.ok("artboard_rename", json!({ "project": p, "artboard": dup, "name": "Slime 2" }));
+    assert_eq!(f.err("artboard_delete", json!({ "project": p, "artboard": dup })).code, "confirmation_required");
+    let ops = json!([{ "op": "artboard_delete", "artboard": dup }]);
+    assert_eq!(f.err("batch", json!({ "project": p, "ops": ops })).code, "confirmation_required");
+    f.ok("artboard_delete", json!({ "project": p, "artboard": dup, "confirm": true }));
+    assert_eq!(f.ok("artboard_list", json!({ "project": p }))["artboards"].as_array().unwrap().len(), 2);
+
+    // The palette is shared by the project.
+    f.ok("set_palette", json!({ "project": p, "name": "Mono", "colors": ["#000", "#fff"] }));
+    assert_eq!(f.ok("project_get", json!({ "project": p }))["summary"]["palette"]["name"], "Mono");
+    assert_eq!(
+        f.err("set_palette", json!({ "project": p, "artboard": first, "name": "x", "colors": [] })).code,
+        "invalid_arguments"
+    );
+
+    // Exports pick the artboard and name files after it.
+    f.ok("export_godot", json!({ "project": p, "artboard": second, "dir": "godot" }));
+    assert!(f.root.path().join("godot/Slime.tres").exists());
+    assert_eq!(f.err("export_png", json!({ "project": p, "path": "a.png" })).code, "artboard_required");
+
+    f.ok("project_save", json!({ "project": p }));
+    let saved = format::load(&f.root.path().join("art.dotify")).unwrap();
+    assert_eq!(saved.artboards().len(), 2);
+    assert_eq!(saved.artboards()[1].name(), "Slime");
+
+    // Deleting the last artboard is refused by the engine.
+    f.ok("artboard_delete", json!({ "project": p, "artboard": second, "confirm": true }));
+    assert_eq!(
+        f.err("artboard_delete", json!({ "project": p, "artboard": first, "confirm": true })).code,
+        "last_artboard"
+    );
 }

@@ -4,7 +4,9 @@
 
 use std::borrow::Cow;
 
-use dotify_core::{Command, FrameId, LayerId, PixelWrite, PlaybackDirection, Point, Rgba};
+use dotify_core::{
+    ArtboardId, Command, FolderId, FrameId, LayerId, PixelWrite, PlaybackDirection, Point, ProjectCommand, Rgba,
+};
 use dotify_export::meta::Pivot;
 use dotify_export::sheet::{SheetLayout, SheetOptions};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
@@ -280,6 +282,40 @@ pub struct TagRef {
 
 #[derive(Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields)]
+pub struct ArtboardCreate {
+    /// Defaults to "Sprite N".
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Canvas width in pixels (1 to 4096).
+    pub width: u32,
+    /// Canvas height in pixels (1 to 4096).
+    pub height: u32,
+    /// Library folder ID to put it in.
+    #[serde(default)]
+    pub folder: Option<u32>,
+    /// Position in the library; defaults to the end.
+    #[serde(default)]
+    pub index: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ArtboardRename {
+    /// Artboard ID (from project_get / artboard_list).
+    pub artboard: u32,
+    pub name: String,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ArtboardRef {
+    /// Artboard ID (from project_get / artboard_list).
+    pub artboard: u32,
+}
+
+/// The palette shared by every artboard of the project.
+#[derive(Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct SetPalette {
     pub name: String,
     /// Up to 256 colors.
@@ -289,6 +325,8 @@ pub struct SetPalette {
 
 /// One edit, as used by `batch`. `op` is the name of the matching single
 /// edit tool; the other fields are that tool's arguments without `project`.
+/// Artboard edits may name their `artboard`; the batch's `artboard` is the
+/// default.
 #[derive(Deserialize, JsonSchema, Debug)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EditOp {
@@ -312,15 +350,53 @@ pub enum EditOp {
     TagUpdate(TagUpdate),
     TagDelete(TagRef),
     SetPalette(SetPalette),
+    ArtboardCreate(ArtboardCreate),
+    ArtboardRename(ArtboardRename),
+    ArtboardDuplicate(ArtboardRef),
+    ArtboardDelete(ArtboardRef),
+}
+
+/// Ops that act on the project library (or its shared palette) rather than
+/// on one artboard. They take no `artboard` default.
+pub const LIBRARY_OPS: &[&str] =
+    &["set_palette", "artboard_create", "artboard_rename", "artboard_duplicate", "artboard_delete"];
+
+/// What an [`EditOp`] compiles to.
+pub enum OpCommand {
+    /// A document command for one artboard.
+    Document(Command),
+    /// A project-level command.
+    Project(ProjectCommand),
 }
 
 impl EditOp {
     /// Ops that remove pixels or structure and need `confirm: true`.
     pub fn is_destructive(&self) -> bool {
-        matches!(self, EditOp::LayerDelete(_) | EditOp::DeleteFrame(_))
+        matches!(self, EditOp::LayerDelete(_) | EditOp::DeleteFrame(_) | EditOp::ArtboardDelete(_))
     }
 
-    pub fn into_command(self) -> Command {
+    pub fn into_command(self) -> OpCommand {
+        let a = ArtboardId;
+        let project = match self {
+            EditOp::SetPalette(p) => {
+                ProjectCommand::SetPalette { palette: dotify_core::Palette { name: p.name, colors: p.colors } }
+            }
+            EditOp::ArtboardCreate(p) => ProjectCommand::CreateArtboard {
+                name: p.name,
+                width: p.width,
+                height: p.height,
+                folder: p.folder.map(FolderId),
+                index: p.index,
+            },
+            EditOp::ArtboardRename(p) => ProjectCommand::RenameArtboard { artboard: a(p.artboard), name: p.name },
+            EditOp::ArtboardDuplicate(p) => ProjectCommand::DuplicateArtboard { artboard: a(p.artboard) },
+            EditOp::ArtboardDelete(p) => ProjectCommand::DeleteArtboard { artboard: a(p.artboard) },
+            doc => return OpCommand::Document(doc.into_document_command()),
+        };
+        OpCommand::Project(project)
+    }
+
+    fn into_document_command(self) -> Command {
         let (l, f) = (LayerId, FrameId);
         match self {
             EditOp::SetPixels(a) => Command::SetPixels {
@@ -417,9 +493,11 @@ impl EditOp {
                 color: a.color,
             },
             EditOp::TagDelete(a) => Command::DeleteTag { tag: a.tag },
-            EditOp::SetPalette(a) => {
-                Command::SetPalette { palette: dotify_core::Palette { name: a.name, colors: a.colors } }
-            }
+            EditOp::SetPalette(_)
+            | EditOp::ArtboardCreate(_)
+            | EditOp::ArtboardRename(_)
+            | EditOp::ArtboardDuplicate(_)
+            | EditOp::ArtboardDelete(_) => unreachable!("library ops are handled by into_command"),
         }
     }
 }
@@ -466,6 +544,15 @@ pub struct ProjectRef {
 
 #[derive(Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields)]
+pub struct ArtboardScoped {
+    pub project: String,
+    /// Artboard ID; may be left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
+}
+
+#[derive(Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectSave {
     pub project: String,
     /// Save to this `.dotify` path instead of the project's own file (it
@@ -491,6 +578,9 @@ pub struct ProjectClose {
 #[serde(deny_unknown_fields)]
 pub struct GetCanvas {
     pub project: String,
+    /// Artboard ID; may be left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
     /// Frame ID; defaults to the first frame.
     #[serde(default)]
     pub frame: Option<u32>,
@@ -513,6 +603,9 @@ pub struct GetCanvas {
 #[serde(deny_unknown_fields)]
 pub struct ExportPng {
     pub project: String,
+    /// Artboard ID; may be left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
     /// Output `.png` path.
     pub path: String,
     /// Frame ID; defaults to the first frame.
@@ -530,6 +623,9 @@ pub struct ExportPng {
 #[serde(deny_unknown_fields)]
 pub struct ExportGif {
     pub project: String,
+    /// Artboard ID; may be left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
     /// Output `.gif` path.
     pub path: String,
     /// Only this tag, with its direction and loop setting; defaults to every
@@ -603,6 +699,9 @@ impl SheetArgs {
 #[serde(deny_unknown_fields)]
 pub struct ExportSpritesheet {
     pub project: String,
+    /// Artboard ID; may be left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
     /// Output `.png` path; the JSON metadata is written next to it.
     pub path: String,
     #[serde(default)]
@@ -615,6 +714,9 @@ pub struct ExportSpritesheet {
 #[serde(deny_unknown_fields)]
 pub struct ExportGodot {
     pub project: String,
+    /// Artboard ID; may be left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
     /// Output directory; `<name>.png`, `<name>.tres` (SpriteFrames, one
     /// animation per tag) and `<name>.json` are written into it.
     pub dir: String,
@@ -644,7 +746,28 @@ pub struct Batch {
     /// Refuse to apply unless the project is at this revision.
     #[serde(default)]
     pub expected_revision: Option<u64>,
-    /// Required when the batch deletes layers or frames.
+    /// Default artboard for artboard edits that don't name one; may be
+    /// left out when the project has one artboard.
+    #[serde(default)]
+    pub artboard: Option<u32>,
+    /// Required when the batch deletes layers, frames or artboards.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+/// [`Batch`] as parsed: ops stay raw until each one's `artboard` is taken
+/// out. `Batch` itself only describes the schema.
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct BatchArgs {
+    pub project: String,
+    pub ops: Vec<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
+    #[serde(default)]
+    pub artboard: Option<u32>,
     #[serde(default)]
     pub confirm: bool,
 }

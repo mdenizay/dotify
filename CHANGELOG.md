@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `dotify-mcp`: a Model Context Protocol server over stdio (Claude Code, Claude Desktop) and Streamable HTTP (ChatGPT developer mode through a tunnel). Projects, drawing, layers, frames, tags, palette, batch, undo/redo, canvas previews and every export, each call one undoable step
+- `dotify-mcp`: a Model Context Protocol server over stdio (Claude Code, Claude Desktop) and Streamable HTTP (ChatGPT developer mode through a tunnel). Projects and their artboards, drawing, layers, frames (including copy frame and silhouette), tags, palette, batch, undo/redo, canvas previews and every export, each call one undoable step
 - MCP safety: access limited to `--root` directories, bearer token for HTTP (loopback by default), `confirm: true` for deletes and overwrites, `--read-only` mode, `expected_revision` checks
 - The `dotify-cli` Homebrew formula now also installs `dotify-mcp`
 
@@ -18,6 +18,11 @@
 - Godot 4 export: spritesheet PNG plus a `SpriteFrames` `.tres` with one animation per tag
 - CLI: `export-sheet`, `export-gif` and `export-godot`
 - Project format version 2: tags gain a `loop` flag (older files open with every tag looping)
+- Project library: one `.dotify` project now holds many artboards (sprites), each with its own size, layers, frames and tags, sharing one palette
+- Library sidebar with thumbnails, folders, search, drag and drop and a context menu (rename, duplicate, move, delete)
+- Artboard overview: all artboards side by side with pan and zoom; double-click one to edit it
+- Export all artboards in one go, as PNG or Godot 4 SpriteFrames, with one sub-folder per library folder (⌥⌘E, or `dotify export-all [--godot]`)
+- Project format version 3: a project of artboards; version 1 and 2 files open as a project with one artboard
 
 ## 0.1.2
 

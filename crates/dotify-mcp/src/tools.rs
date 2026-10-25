@@ -1,13 +1,13 @@
 //! The Dotify tool set, independent of the MCP transport. Every edit goes
-//! through `dotify_core::Editor::execute_expecting`, so each tool call (or
-//! `batch`) is one undoable transaction, exactly as in the desktop app.
+//! through `dotify_core::ProjectEditor::execute_expecting`, so each tool call
+//! (or `batch`) is one undoable transaction, exactly as in the desktop app.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use dotify_core::composite::composite_frame;
 use dotify_core::format::{self, WriteOptions};
-use dotify_core::{Command, Document, Editor, FrameId, LayerId, Outcome};
+use dotify_core::{ArtboardId, Document, FrameId, LayerId, Project, ProjectCommand, ProjectEditor, ProjectOutcome};
 use dotify_export::gif::GifOptions;
 use dotify_export::godot::GodotOptions;
 use dotify_export::PngExportOptions;
@@ -83,8 +83,27 @@ fn schema_of<T: JsonSchema>() -> JsonObject {
 /// Schema of an edit tool: the op's own fields plus `project`,
 /// `expected_revision` and, for destructive ops, `confirm`.
 fn edit_schema<T: JsonSchema>(destructive: bool) -> JsonObject {
+    edit_schema_with::<T>(destructive, true)
+}
+
+/// Edit schema for library ops, which take no `artboard` default.
+fn library_schema<T: JsonSchema>(destructive: bool) -> JsonObject {
+    edit_schema_with::<T>(destructive, false)
+}
+
+fn artboard_prop() -> Value {
+    json!({
+        "type": "integer", "minimum": 0,
+        "description": "Artboard ID (from project_get); may be left out when the project has one artboard."
+    })
+}
+
+fn edit_schema_with<T: JsonSchema>(destructive: bool, artboard: bool) -> JsonObject {
     let mut s = schema_of::<T>();
     let props = s.entry("properties").or_insert_with(|| json!({})).as_object_mut().expect("properties object");
+    if artboard {
+        props.insert("artboard".into(), artboard_prop());
+    }
     props.insert(
         "project".into(),
         json!({ "type": "string", "description": "Project handle returned by project_create / project_open." }),
@@ -106,6 +125,25 @@ fn edit_schema<T: JsonSchema>(destructive: bool) -> JsonObject {
     required.insert(0, json!("project"));
     if destructive {
         required.push(json!("confirm"));
+    }
+    s
+}
+
+/// `batch`'s schema, with an optional `artboard` on every artboard op.
+fn batch_schema() -> JsonObject {
+    let mut s = schema_of::<Batch>();
+    let variants = s
+        .get_mut("properties")
+        .and_then(|p| p.get_mut("ops"))
+        .and_then(|o| o.get_mut("items"))
+        .and_then(|i| i.get_mut("oneOf"))
+        .and_then(Value::as_array_mut)
+        .expect("batch ops are a oneOf");
+    for v in variants {
+        let op = v["properties"]["op"]["const"].as_str().unwrap_or_default().to_string();
+        if !LIBRARY_OPS.contains(&op.as_str()) {
+            v["properties"]["artboard"] = artboard_prop();
+        }
     }
     s
 }
@@ -132,15 +170,25 @@ fn definitions() -> Vec<ToolDef> {
         "project_open", "Open project", false, false, schema_of::<ProjectOpen>(),
             "Open a .dotify file. Returns the project handle and its structure (layer and frame IDs, palette, tags, revision).";
         "project_get", "Get project", false, false, schema_of::<ProjectRef>(),
-            "Get a project's structure: size, layers (bottom to top) and frames with their IDs, palette, tags, revision, unsaved changes and undo state.";
+            "Get a project's structure: its artboards (each with size, layers bottom to top, frames and tags, all with IDs), library folders, shared palette, revision, unsaved changes and undo state.";
+        "artboard_list", "List artboards", false, false, schema_of::<ProjectRef>(),
+            "List a project's artboards (sprites) in library order with their IDs, names, folders and sizes.";
+        "artboard_create", "Create artboard", true, false, library_schema::<ArtboardCreate>(false),
+            "Add an artboard (a separate sprite with its own size, layers, frames and tags) to the project. The result's `created` holds its ID.";
+        "artboard_rename", "Rename artboard", true, false, library_schema::<ArtboardRename>(false),
+            "Rename an artboard.";
+        "artboard_duplicate", "Duplicate artboard", true, false, library_schema::<ArtboardRef>(false),
+            "Insert a deep copy of an artboard right after it.";
+        "artboard_delete", "Delete artboard", true, true, library_schema::<ArtboardRef>(true),
+            "Delete an artboard with all its layers, frames and pixels. Needs confirm: true.";
         "project_save", "Save project", true, false, schema_of::<ProjectSave>(),
             "Save a project to its file, or to a new .dotify path. Replacing a different existing file needs confirm: true.";
         "project_close", "Close project", false, false, schema_of::<ProjectClose>(),
             "Close a project. Discarding unsaved changes needs confirm: true.";
         "get_canvas", "Get canvas", false, false, schema_of::<GetCanvas>(),
-            "Render a frame (all visible layers, or one layer) as a PNG image so you can see it. Optionally also returns the exact pixels as text.";
-        "layer_list", "List layers", false, false, schema_of::<ProjectRef>(),
-            "List a project's layers from bottom to top with their IDs, visibility, lock state and opacity.";
+            "Render a frame of an artboard (all visible layers, or one layer) as a PNG image so you can see it. Optionally also returns the exact pixels as text.";
+        "layer_list", "List layers", false, false, schema_of::<ArtboardScoped>(),
+            "List an artboard's layers from bottom to top with their IDs, visibility, lock state and opacity.";
         "set_pixels", "Set pixels", true, false, edit_schema::<SetPixels>(false),
             "Set individual pixels on one layer and frame. Colors replace pixels; use #00000000 to erase.";
         "draw_line", "Draw line", true, false, edit_schema::<DrawLine>(false),
@@ -179,9 +227,9 @@ fn definitions() -> Vec<ToolDef> {
             "Change a tag's name, frame range, direction, looping or color.";
         "tag_delete", "Delete tag", true, false, edit_schema::<TagRef>(false),
             "Delete a tag. Frames and pixels are kept.";
-        "set_palette", "Set palette", true, false, edit_schema::<SetPalette>(false),
-            "Replace the document palette.";
-        "batch", "Batch edit", true, false, schema_of::<Batch>(),
+        "set_palette", "Set palette", true, false, library_schema::<SetPalette>(false),
+            "Replace the palette shared by every artboard of the project.";
+        "batch", "Batch edit", true, false, batch_schema(),
             "Apply several edits atomically as one undo step. Each op has `op` set to an edit tool name (set_pixels, draw_line, layer_create, …) plus that tool's arguments without `project`. If any op fails, nothing is applied.";
         "undo", "Undo", true, false, schema_of::<ProjectRef>(),
             "Undo the last edit transaction.";
@@ -232,7 +280,7 @@ fn project_json(id: &str, p: &OpenProject) -> Value {
     })
 }
 
-fn outcome_json(id: &str, outcome: &Outcome, editor: &Editor) -> Value {
+fn outcome_json(id: &str, outcome: &ProjectOutcome, editor: &ProjectEditor) -> Value {
     json!({
         "project": id,
         "revision": outcome.revision,
@@ -240,9 +288,39 @@ fn outcome_json(id: &str, outcome: &Outcome, editor: &Editor) -> Value {
         "label": outcome.label,
         "created": outcome.created,
         "changed_regions": outcome.dirty,
+        "artboards": outcome.artboards,
         "structure_changed": outcome.structure_changed,
         "unsaved_changes": editor.is_dirty(),
     })
+}
+
+fn artboard_list(project: &Project) -> Vec<Value> {
+    project
+        .artboards()
+        .iter()
+        .map(|a| {
+            let d = a.document();
+            json!({ "id": a.id(), "name": a.name(), "folder": a.folder(), "width": d.width(), "height": d.height() })
+        })
+        .collect()
+}
+
+/// The artboard a call addresses: the one named, or the only one.
+fn resolve_artboard(project: &Project, artboard: Option<u32>) -> ToolResult<ArtboardId> {
+    match artboard {
+        Some(id) => Ok(project.artboard(ArtboardId(id))?.id()),
+        None if project.artboards().len() == 1 => Ok(project.artboards()[0].id()),
+        None => Err(ToolError::new(
+            "artboard_required",
+            format!("this project has {} artboards; pass `artboard` with one of their IDs", project.artboards().len()),
+        )
+        .with_details(json!({ "artboards": artboard_list(project) }))),
+    }
+}
+
+/// The document of the artboard a call addresses.
+fn document(project: &Project, artboard: Option<u32>) -> ToolResult<&Document> {
+    Ok(project.document(resolve_artboard(project, artboard)?)?)
 }
 
 fn first_frame(doc: &Document, frame: Option<u32>) -> ToolResult<FrameId> {
@@ -309,12 +387,22 @@ impl Dotify {
             "project_close" => json(self.project_close(parse(args)?)),
             "get_canvas" => self.get_canvas(parse(args)?),
             "layer_list" => {
+                let a: ArtboardScoped = parse(args)?;
+                let ws = self.workspace();
+                let project = ws.get(&a.project)?.editor.project();
+                let artboard = resolve_artboard(project, a.artboard)?;
+                let layers = project.document(artboard)?.layers();
+                Ok(ToolOutput::Json(json!({ "project": a.project, "artboard": artboard, "layers": layers })))
+            }
+            "artboard_list" => {
                 let a: ProjectRef = parse(args)?;
                 let ws = self.workspace();
-                let doc = ws.get(&a.project)?.editor.document();
-                Ok(ToolOutput::Json(json!({ "project": a.project, "layers": doc.layers() })))
+                let p = ws.get(&a.project)?.editor.project();
+                Ok(ToolOutput::Json(
+                    json!({ "project": a.project, "artboards": artboard_list(p), "folders": p.folders() }),
+                ))
             }
-            "batch" => json(self.batch(parse(args)?)),
+            "batch" => json(self.batch(parse::<BatchArgs>(args)?)),
             "undo" | "redo" => json(self.undo_redo(parse(args)?, name == "undo")),
             "export_png" => json(self.export_png(parse(args)?)),
             "export_gif" => json(self.export_gif(parse(args)?)),
@@ -325,6 +413,8 @@ impl Dotify {
     }
 
     fn edit_tool(&self, def: &ToolDef, mut args: JsonObject) -> ToolResult<Value> {
+        let library = LIBRARY_OPS.contains(&def.name);
+        let artboard = if library { None } else { take_artboard(&mut args)? };
         let project = match args.remove("project") {
             Some(Value::String(s)) => s,
             Some(_) => return Err(ToolError::invalid("project must be a string")),
@@ -345,33 +435,50 @@ impl Dotify {
         if op.is_destructive() {
             require_confirm(confirm, format!("{} removes content", def.name))?;
         }
-        self.execute(&project, op.into_command(), expected)
-    }
-
-    fn execute(&self, project: &str, cmd: Command, expected: Option<u64>) -> ToolResult<Value> {
         let mut ws = self.workspace();
-        let p = ws.get_mut(project)?;
+        let p = ws.get_mut(&project)?;
+        let cmd = to_project_command(p.editor.project(), op, artboard)?;
         let outcome = p.editor.execute_expecting(cmd, expected)?;
-        Ok(outcome_json(project, &outcome, &p.editor))
+        Ok(outcome_json(&project, &outcome, &p.editor))
     }
 
-    fn batch(&self, a: Batch) -> ToolResult<Value> {
+    fn batch(&self, a: BatchArgs) -> ToolResult<Value> {
         if a.ops.is_empty() {
             return Err(ToolError::invalid("ops must not be empty"));
         }
         if a.ops.len() > MAX_BATCH_OPS {
             return Err(ToolError::invalid(format!("a batch is limited to {MAX_BATCH_OPS} ops")));
         }
+        let mut ops = Vec::with_capacity(a.ops.len());
+        for (i, mut raw) in a.ops.into_iter().enumerate() {
+            let library = raw.get("op").and_then(Value::as_str).is_some_and(|op| LIBRARY_OPS.contains(&op));
+            let artboard = if library { None } else { take_artboard(&mut raw)? };
+            let op: EditOp = parse(raw).map_err(|e| ToolError::invalid(format!("ops[{i}]: {}", e.message)))?;
+            ops.push((op, artboard.or(a.artboard)));
+        }
         let destructive: Vec<usize> =
-            a.ops.iter().enumerate().filter(|(_, o)| o.is_destructive()).map(|(i, _)| i).collect();
+            ops.iter().enumerate().filter(|(_, (o, _))| o.is_destructive()).map(|(i, _)| i).collect();
         if !destructive.is_empty() && !a.confirm {
             return Err(ToolError::confirmation_required(
-                "this batch deletes layers or frames; call again with confirm: true",
+                "this batch deletes layers, frames or artboards; call again with confirm: true",
             )
             .with_details(json!({ "ops": destructive })));
         }
-        let commands = a.ops.into_iter().map(EditOp::into_command).collect();
-        self.execute(&a.project, Command::Batch { label: a.label, commands }, a.expected_revision)
+        let mut ws = self.workspace();
+        let p = ws.get_mut(&a.project)?;
+        let commands = ops
+            .into_iter()
+            .enumerate()
+            .map(|(i, (op, artboard))| {
+                to_project_command(p.editor.project(), op, artboard).map_err(|mut e| {
+                    e.message = format!("ops[{i}]: {}", e.message);
+                    e
+                })
+            })
+            .collect::<ToolResult<_>>()?;
+        let outcome =
+            p.editor.execute_expecting(ProjectCommand::Batch { label: a.label, commands }, a.expected_revision)?;
+        Ok(outcome_json(&a.project, &outcome, &p.editor))
     }
 
     fn undo_redo(&self, a: ProjectRef, undo: bool) -> ToolResult<Value> {
@@ -396,7 +503,8 @@ impl Dotify {
             .map(|(id, p)| {
                 json!({
                     "project": id,
-                    "name": p.editor.document().name(),
+                    "name": p.editor.project().name(),
+                    "artboards": p.editor.project().artboards().len(),
                     "path": p.path,
                     "revision": p.editor.revision(),
                     "unsaved_changes": p.editor.is_dirty(),
@@ -435,11 +543,11 @@ impl Dotify {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "Untitled".into())
         });
-        let doc = Document::new(name, a.width, a.height)?;
+        let project = Project::new(name, a.width, a.height)?;
         if let Some(path) = &path {
-            format::save(&doc, path, WriteOptions::default())?;
+            format::save(&project, path, WriteOptions::default())?;
         }
-        let id = ws.insert(OpenProject { editor: Editor::new(doc), path })?;
+        let id = ws.insert(OpenProject { editor: ProjectEditor::new(project), path })?;
         Ok(project_json(&id, ws.get(&id)?))
     }
 
@@ -451,8 +559,8 @@ impl Dotify {
             v["already_open"] = json!(true);
             return Ok(v);
         }
-        let doc = format::load(&path)?;
-        let id = ws.insert(OpenProject { editor: Editor::new(doc), path: Some(path) })?;
+        let project = format::load(&path)?;
+        let id = ws.insert(OpenProject { editor: ProjectEditor::new(project), path: Some(path) })?;
         Ok(project_json(&id, ws.get(&id)?))
     }
 
@@ -472,7 +580,7 @@ impl Dotify {
             check_overwrite(&[&target], a.confirm)?;
         }
         let p = ws.get_mut(&a.project)?;
-        format::save(p.editor.document(), &target, WriteOptions::default())?;
+        format::save(p.editor.project(), &target, WriteOptions::default())?;
         p.editor.mark_saved();
         p.path = Some(target.clone());
         Ok(json!({ "project": a.project, "path": target, "revision": p.editor.revision() }))
@@ -489,7 +597,9 @@ impl Dotify {
 
     fn get_canvas(&self, a: GetCanvas) -> ToolResult<ToolOutput> {
         let ws = self.workspace();
-        let doc = ws.get(&a.project)?.editor.document();
+        let project = ws.get(&a.project)?.editor.project();
+        let artboard = resolve_artboard(project, a.artboard)?;
+        let doc = project.document(artboard)?;
         let frame = first_frame(doc, a.frame)?;
         let image = match a.layer {
             Some(l) => {
@@ -513,6 +623,7 @@ impl Dotify {
         let mut info = json!({
             "project": a.project,
             "revision": ws.get(&a.project)?.editor.revision(),
+            "artboard": artboard,
             "frame": frame,
             "layer": a.layer,
             "width": doc.width(),
@@ -529,7 +640,7 @@ impl Dotify {
         let path = self.sandbox.writable_file(&a.path, &["png"])?;
         check_overwrite(&[&path], a.confirm)?;
         let ws = self.workspace();
-        let doc = ws.get(&a.project)?.editor.document();
+        let doc = document(ws.get(&a.project)?.editor.project(), a.artboard)?;
         let frame = first_frame(doc, a.frame)?;
         dotify_export::export_png(doc, PngExportOptions { frame, scale: a.scale.unwrap_or(1) }, &path)?;
         Ok(json!({ "files": [path] }))
@@ -539,7 +650,7 @@ impl Dotify {
         let path = self.sandbox.writable_file(&a.path, &["gif"])?;
         check_overwrite(&[&path], a.confirm)?;
         let ws = self.workspace();
-        let doc = ws.get(&a.project)?.editor.document();
+        let doc = document(ws.get(&a.project)?.editor.project(), a.artboard)?;
         let opts = GifOptions { scale: a.scale.unwrap_or(1), tag: a.tag };
         let report = dotify_export::gif::export_gif(doc, &opts, &path)?;
         Ok(json!({ "files": [path], "report": report }))
@@ -550,7 +661,7 @@ impl Dotify {
         let json_path = path.with_extension("json");
         check_overwrite(&[&path, &json_path], a.confirm)?;
         let ws = self.workspace();
-        let doc = ws.get(&a.project)?.editor.document();
+        let doc = document(ws.get(&a.project)?.editor.project(), a.artboard)?;
         let json_path = dotify_export::export_spritesheet(doc, &a.sheet.options(), a.sheet.pivot(), &path)?;
         Ok(json!({ "files": [path, json_path] }))
     }
@@ -558,7 +669,7 @@ impl Dotify {
     fn export_godot(&self, a: ExportGodot) -> ToolResult<Value> {
         let dir = self.sandbox.writable_dir(&a.dir)?;
         let ws = self.workspace();
-        let doc = ws.get(&a.project)?.editor.document();
+        let doc = document(ws.get(&a.project)?.editor.project(), a.artboard)?;
         let stem = dotify_export::godot::file_stem(a.name.as_deref().unwrap_or(doc.name()));
         let files: Vec<PathBuf> = ["png", "tres", "json"].iter().map(|e| dir.join(format!("{stem}.{e}"))).collect();
         check_overwrite(&files.iter().map(PathBuf::as_path).collect::<Vec<_>>(), a.confirm)?;
@@ -566,6 +677,28 @@ impl Dotify {
         let written = dotify_export::godot::export_godot(doc, &opts, &dir)?;
         Ok(json!({ "files": [written.png, written.tres, written.json] }))
     }
+}
+
+/// Take an optional `artboard` ID out of raw arguments.
+fn take_artboard(args: &mut JsonObject) -> ToolResult<Option<u32>> {
+    match args.remove("artboard") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| ToolError::invalid("artboard must be a non-negative integer")),
+    }
+}
+
+/// Compile an op for the project, addressing document ops to `artboard`.
+fn to_project_command(project: &Project, op: EditOp, artboard: Option<u32>) -> ToolResult<ProjectCommand> {
+    Ok(match op.into_command() {
+        OpCommand::Project(cmd) => cmd,
+        OpCommand::Document(command) => {
+            ProjectCommand::Edit { artboard: resolve_artboard(project, artboard)?, command }
+        }
+    })
 }
 
 /// The image as rows of one character per pixel, with a legend.

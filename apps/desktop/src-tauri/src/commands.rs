@@ -3,10 +3,12 @@
 
 use std::path::PathBuf;
 
+use dotify_core::composite::composite_frame;
 use dotify_core::format::{self, WriteOptions};
-use dotify_core::{Command, Document, FrameId, LayerId, Outcome, Rect};
+use dotify_core::{ArtboardId, Document, FrameId, LayerId, Project, ProjectCommand, ProjectOutcome, Rect};
 use dotify_export::gif::{GifOptions, GifReport};
 use dotify_export::godot::{GodotFiles, GodotOptions};
+use dotify_export::project::{ArtboardExporter, GodotArtboardExporter, PngArtboardExporter};
 use dotify_export::sheet::SheetOptions;
 use dotify_export::PngExportOptions;
 use serde::Serialize;
@@ -48,7 +50,7 @@ impl From<dotify_export::ExportError> for CmdError {
 
 type CmdResult<T> = Result<T, CmdError>;
 
-/// Keep the native window title in sync with the document.
+/// Keep the native window title in sync with the project.
 fn sync_title(app: &AppHandle, session: &Session) {
     if let Some(win) = app.get_webview_window("main") {
         let dirty = if session.editor.is_dirty() { " — Edited" } else { "" };
@@ -79,9 +81,9 @@ pub fn doc_new(
     height: u32,
 ) -> CmdResult<SessionView> {
     let name = if name.trim().is_empty() { "Untitled".to_string() } else { name.trim().to_string() };
-    let doc = Document::new(name, width, height)?;
+    let project = Project::new(name, width, height)?;
     state.discard_recovery();
-    Ok(replace_session(&app, &state, Session::new(doc, None)))
+    Ok(replace_session(&app, &state, Session::new(project, None)))
 }
 
 #[tauri::command]
@@ -93,9 +95,9 @@ pub async fn doc_open(app: AppHandle, state: State<'_, AppState>) -> CmdResult<O
         .add_filter("Dotify Project", &[format::FILE_EXTENSION])
         .blocking_pick_file();
     let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
-    let doc = format::load(&path)?;
+    let project = format::load(&path)?;
     state.discard_recovery();
-    Ok(Some(replace_session(&app, &state, Session::new(doc, Some(path)))))
+    Ok(Some(replace_session(&app, &state, Session::new(project, Some(path)))))
 }
 
 fn pick_save_path(app: &AppHandle, suggested: &str) -> Option<PathBuf> {
@@ -110,11 +112,11 @@ fn pick_save_path(app: &AppHandle, suggested: &str) -> Option<PathBuf> {
 }
 
 fn save_to(app: &AppHandle, state: &AppState, path: PathBuf) -> CmdResult<SessionView> {
-    let (doc, revision) = {
+    let (project, revision) = {
         let s = state.lock();
-        (s.editor.document().clone(), s.editor.revision())
+        (s.editor.project().clone(), s.editor.revision())
     };
-    format::save(&doc, &path, WriteOptions::default())?;
+    format::save(&project, &path, WriteOptions::default())?;
     let mut s = state.lock();
     // Only mark clean if nothing changed while we were writing.
     if s.editor.revision() == revision {
@@ -148,9 +150,9 @@ pub async fn doc_save_as(app: AppHandle, state: State<'_, AppState>) -> CmdResul
 pub fn execute(
     app: AppHandle,
     state: State<'_, AppState>,
-    command: Command,
+    command: ProjectCommand,
     expected_revision: Option<u64>,
-) -> CmdResult<Outcome> {
+) -> CmdResult<ProjectOutcome> {
     let mut s = state.lock();
     let result = s.editor.execute_expecting(command, expected_revision);
     #[cfg(debug_assertions)]
@@ -161,7 +163,7 @@ pub fn execute(
 }
 
 #[tauri::command]
-pub fn undo(app: AppHandle, state: State<'_, AppState>) -> Option<Outcome> {
+pub fn undo(app: AppHandle, state: State<'_, AppState>) -> Option<ProjectOutcome> {
     let mut s = state.lock();
     let outcome = s.editor.undo();
     #[cfg(debug_assertions)]
@@ -171,18 +173,33 @@ pub fn undo(app: AppHandle, state: State<'_, AppState>) -> Option<Outcome> {
 }
 
 #[tauri::command]
-pub fn redo(app: AppHandle, state: State<'_, AppState>) -> Option<Outcome> {
+pub fn redo(app: AppHandle, state: State<'_, AppState>) -> Option<ProjectOutcome> {
     let mut s = state.lock();
     let outcome = s.editor.redo();
     sync_title(&app, &s);
     outcome
 }
 
+/// Open an artboard in the editor.
+#[tauri::command]
+pub fn artboard_activate(app: AppHandle, state: State<'_, AppState>, artboard: u32) -> CmdResult<SessionView> {
+    let mut s = state.lock();
+    s.set_active(ArtboardId(artboard))?;
+    sync_title(&app, &s);
+    Ok(s.view())
+}
+
 /// Raw RGBA bytes of a cel region (whole canvas when `rect` is omitted).
 #[tauri::command]
-pub fn read_cel(state: State<'_, AppState>, layer: u32, frame: u32, rect: Option<Rect>) -> CmdResult<Response> {
+pub fn read_cel(
+    state: State<'_, AppState>,
+    artboard: u32,
+    layer: u32,
+    frame: u32,
+    rect: Option<Rect>,
+) -> CmdResult<Response> {
     let s = state.lock();
-    let doc = s.editor.document();
+    let doc = s.editor.project().document(ArtboardId(artboard))?;
     let (layer, frame) = (LayerId(layer), FrameId(frame));
     doc.layer(layer)?;
     doc.frame(frame)?;
@@ -197,20 +214,31 @@ pub fn read_cel(state: State<'_, AppState>, layer: u32, frame: u32, rect: Option
     Ok(Response::new(bytes))
 }
 
+/// Raw RGBA bytes of an artboard's composited frame (the first frame when
+/// `frame` is omitted), for library thumbnails and the overview.
+#[tauri::command]
+pub fn artboard_composite(state: State<'_, AppState>, artboard: u32, frame: Option<u32>) -> CmdResult<Response> {
+    let s = state.lock();
+    let doc = s.editor.project().document(ArtboardId(artboard))?;
+    let frame = frame.map(FrameId).unwrap_or(doc.frames()[0].id);
+    Ok(Response::new(composite_frame(doc, frame)?.data().to_vec()))
+}
+
 /// Raw RGBA bytes of a frame with all visible layers composited by the
 /// engine (used for playback, onion skins and the preview).
 #[tauri::command]
-pub fn read_frame(state: State<'_, AppState>, frame: u32) -> CmdResult<Response> {
+pub fn read_frame(state: State<'_, AppState>, artboard: u32, frame: u32) -> CmdResult<Response> {
     let s = state.lock();
-    let img = dotify_core::composite::composite_frame(s.editor.document(), FrameId(frame))?;
+    let img = composite_frame(s.editor.project().document(ArtboardId(artboard))?, FrameId(frame))?;
     Ok(Response::new(img.into_raw()))
 }
 
-/// The current document and a file stem for suggested export names.
+/// The active artboard and a file stem (its name) for suggested export names.
 fn export_source(state: &AppState) -> (Document, String) {
     let s = state.lock();
-    let stem = s.file_name().trim_end_matches(".dotify").to_string();
-    (s.editor.document().clone(), stem)
+    let doc = s.editor.project().document(s.active()).expect("active artboard exists").clone();
+    let stem = dotify_export::godot::file_stem(doc.name());
+    (doc, stem)
 }
 
 fn pick_export_path(app: &AppHandle, title: &str, file_name: String, filter: &str, ext: &str) -> Option<PathBuf> {
@@ -278,13 +306,15 @@ pub async fn export_godot(
 pub async fn export_png(
     app: AppHandle,
     state: State<'_, AppState>,
+    artboard: u32,
     frame: u32,
     scale: u32,
 ) -> CmdResult<Option<String>> {
     let (doc, stem) = {
         let s = state.lock();
-        let stem = s.file_name().trim_end_matches(".dotify").to_string();
-        (s.editor.document().clone(), stem)
+        let doc = s.editor.project().document(ArtboardId(artboard))?.clone();
+        let stem = doc.name().to_string();
+        (doc, stem)
     };
     let picked = app
         .dialog()
@@ -302,6 +332,32 @@ pub async fn export_png(
     Ok(Some(path.display().to_string()))
 }
 
+#[derive(Serialize)]
+pub struct ExportAllResult {
+    dir: String,
+    files: usize,
+}
+
+/// Export every artboard into a folder the user picks, mirroring the library
+/// folders as sub-directories: the first frame as PNG, or Godot 4 files.
+#[tauri::command]
+pub async fn export_all(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    scale: u32,
+    godot: Option<GodotOptions>,
+) -> CmdResult<Option<ExportAllResult>> {
+    let project = state.lock().editor.project().clone();
+    let picked = app.dialog().file().set_title("Export All Artboards").blocking_pick_folder();
+    let Some(dir) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let exporter: Box<dyn ArtboardExporter> = match godot {
+        Some(options) => Box::new(GodotArtboardExporter { options }),
+        None => Box::new(PngArtboardExporter { scale }),
+    };
+    let written = dotify_export::project::export_project(&project, &dir, exporter.as_ref())?;
+    Ok(Some(ExportAllResult { dir: dir.display().to_string(), files: written.len() }))
+}
+
 #[tauri::command]
 pub fn recovery_status(state: State<'_, AppState>) -> Option<RecoveryInfo> {
     state.recovery_info()
@@ -309,8 +365,8 @@ pub fn recovery_status(state: State<'_, AppState>) -> Option<RecoveryInfo> {
 
 #[tauri::command]
 pub fn recovery_restore(app: AppHandle, state: State<'_, AppState>) -> CmdResult<SessionView> {
-    let (doc, path) = state.take_recovery().map_err(|e| CmdError::new("recovery_failed", e))?;
-    let mut session = Session::new(doc, path);
+    let (project, path) = state.take_recovery().map_err(|e| CmdError::new("recovery_failed", e))?;
+    let mut session = Session::new(project, path);
     session.editor.mark_unsaved();
     Ok(replace_session(&app, &state, session))
 }
