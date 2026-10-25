@@ -75,7 +75,7 @@ export class OverviewView {
     this.canvas = document.createElement("canvas");
     this.canvas.className = "block h-full w-full touch-none outline-none";
     this.canvas.tabIndex = 0;
-    this.canvas.setAttribute("aria-label", "Artboard overview");
+    this.canvas.setAttribute("aria-label", "Sprite overview");
     container.appendChild(this.canvas);
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
     this.readTheme();
@@ -255,7 +255,7 @@ export class OverviewView {
       ctx.fillStyle = colors.dim;
       ctx.font = LABEL_FONT;
       ctx.textAlign = "center";
-      ctx.fillText("No artboards match the search.", this.cssW / 2, this.cssH / 2);
+      ctx.fillText("No sprites match the search.", this.cssW / 2, this.cssH / 2);
       ctx.textAlign = "start";
       return;
     }

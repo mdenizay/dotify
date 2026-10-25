@@ -55,23 +55,23 @@ export function LibraryPanel() {
 
   return (
     <aside
-      aria-label="Library"
+      aria-label="Sprites"
       style={{ width }}
       className="relative flex shrink-0 flex-col border-r border-line bg-panel"
     >
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize library"
+        aria-label="Resize sprites panel"
         onPointerDown={startResize}
         className="absolute top-0 -right-1 bottom-0 z-10 w-2 cursor-col-resize"
       />
       <header className="flex h-8 shrink-0 items-center gap-1 pr-1.5 pl-2.5">
         <span className="flex-1 text-[11px] font-semibold tracking-wide text-dim uppercase">
-          Library
+          Sprites
         </span>
         <IconButton
-          label="Artboard overview"
+          label="Sprite overview"
           shortcut="⇧⌘O"
           active={mode === "overview"}
           onClick={() => controller.setMode(mode === "overview" ? "editor" : "overview")}
@@ -84,10 +84,18 @@ export function LibraryPanel() {
         >
           <FolderPlus size={13} />
         </IconButton>
-        <IconButton label="New artboard" onClick={() => setEditor({ newArtboardOpen: true })}>
-          <Plus size={13} />
-        </IconButton>
       </header>
+      <div className="shrink-0 px-2 pb-2">
+        <button
+          type="button"
+          title="New sprite (⌘N)"
+          onClick={() => setEditor({ newArtboardOpen: true })}
+          className="flex h-7 w-full items-center justify-center gap-1.5 rounded-[5px] border border-dashed border-line-strong text-[12px] text-dim hover:border-accent hover:text-fg"
+        >
+          <Plus size={13} /> New Sprite
+          <span className="font-mono text-[10px] text-faint">⌘N</span>
+        </button>
+      </div>
       <div className="relative shrink-0 px-2 pb-2">
         <Search
           size={12}
@@ -96,7 +104,7 @@ export function LibraryPanel() {
         <input
           {...plainText}
           type="text"
-          aria-label="Search artboards"
+          aria-label="Search sprites"
           placeholder="Search"
           value={search}
           onChange={(e) => setEditor({ librarySearch: e.target.value })}
@@ -207,7 +215,7 @@ function Group({
             <ArtboardRow key={a.id} artboard={a} />
           ))}
           {items.length === 0 && (
-            <li className="h-7 pl-3 leading-7 text-faint">Drop artboards here</li>
+            <li className="h-7 pl-3 leading-7 text-faint">Drop sprites here</li>
           )}
         </ul>
       )}
@@ -264,7 +272,7 @@ function FolderHeader({
       <span className="font-mono text-[10px] text-faint tabular-nums">{count}</span>
       {folder && (
         <IconButton
-          label="Delete folder (keeps its artboards)"
+          label="Delete folder (keeps its sprites)"
           onClick={() => void controller.runProject({ type: "delete_folder", folder: folder.id })}
           className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
         >
@@ -363,7 +371,7 @@ function ArtboardRow({ artboard }: { artboard: ArtboardSummary }) {
       <ArtboardThumb id={artboard.id} />
       {editing ? (
         <RenameInput
-          label="Artboard name"
+          label="Sprite name"
           value={artboard.name}
           onDone={(name) => {
             setEditing(false);

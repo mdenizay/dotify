@@ -25,13 +25,15 @@ through the same command engine you use by hand.
   onion skinning (previous/next count, opacity, red/blue tint), animation
   tags over frame ranges with direction and loop, and a live preview panel
   that keeps looping while you draw
-- Project library: many artboards (sprites) per project, each with its own
-  size, layers, frames and tags, sharing one palette; folders, search, drag
-  and drop, and an overview of all artboards side by side
+- Sprites: one project holds many sprites, each with its own size, layers,
+  frames and tags, sharing one palette. The Sprites panel on the left has
+  New Sprite (⌘N), folders, search, drag and drop, rename, duplicate and
+  delete, plus an overview of all sprites side by side. (The file format,
+  CLI and MCP tools call sprites "artboards".)
 - Undo/redo of every edit, with labels
 - Native `.dotify` project format (versioned ZIP, lossless, checksummed),
   atomic saves, autosave with crash recovery
-- PNG export at 1×–16× with nearest-neighbour scaling, for one artboard or
+- PNG export at 1×–16× with nearest-neighbour scaling, for one sprite or
   all of them at once
 - Spritesheet export (grid or one row per tag, padding, edge extrusion) with
   JSON metadata, and animated GIF export with exact colors
@@ -131,7 +133,7 @@ applied atomically. Tags are edited the same way, for example
 ### Godot 4
 
 File ▸ Export for Godot… (⇧⌘E) or `dotify export-godot` writes three files for the
-active artboard into a folder of your Godot project:
+active sprite into a folder of your Godot project:
 
 - `<name>.png` – the spritesheet
 - `<name>.tres` – a `SpriteFrames` resource with one animation per tag (or a
@@ -175,7 +177,7 @@ See [docs/MCP.md](docs/MCP.md) for Claude Desktop, ChatGPT developer mode
 | ⌘Z / ⇧⌘Z | Undo / redo | ⌘= / ⌘− | Zoom |
 | ⌘0 | Fit | ⌘1 | Actual size |
 | ⌘' | Pixel grid | ⌘E | Export |
-| ⇧⌘E | Export for Godot | | |
+| ⇧⌘E | Export for Godot | ⌘N / ⇧⌘N | New sprite / new project |
 
 ## Project layout
 

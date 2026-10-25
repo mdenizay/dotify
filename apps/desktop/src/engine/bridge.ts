@@ -83,8 +83,14 @@ export function isEngineError(e: unknown): e is EngineError {
   return typeof e === "object" && e !== null && "code" in e && "message" in e;
 }
 
+/** The UI calls artboards "sprites"; reword the engine messages that name them. */
+const SPRITE_MESSAGES: Record<string, string> = {
+  last_artboard: "A project must keep at least one sprite.",
+  artboard_not_found: "That sprite no longer exists.",
+};
+
 export function errorMessage(e: unknown): string {
-  if (isEngineError(e)) return e.message;
+  if (isEngineError(e)) return SPRITE_MESSAGES[e.code] ?? e.message;
   if (e instanceof Error) return e.message;
   return String(e);
 }

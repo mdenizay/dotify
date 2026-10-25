@@ -348,7 +348,7 @@ pub async fn export_all(
     godot: Option<GodotOptions>,
 ) -> CmdResult<Option<ExportAllResult>> {
     let project = state.lock().editor.project().clone();
-    let picked = app.dialog().file().set_title("Export All Artboards").blocking_pick_folder();
+    let picked = app.dialog().file().set_title("Export All Sprites").blocking_pick_folder();
     let Some(dir) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
     let exporter: Box<dyn ArtboardExporter> = match godot {
         Some(options) => Box::new(GodotArtboardExporter { options }),

@@ -480,7 +480,7 @@ class Controller {
       ? { sheet: { ...s.exportSheet, scale: s.exportScale }, res_dir: null }
       : null;
     const result = await this.guard(() => engine.exportAll(s.exportScale, options));
-    if (result) toast(`Exported ${result.files} artboards to ${baseName(result.dir)}`);
+    if (result) toast(`Exported ${result.files} sprites to ${baseName(result.dir)}`);
   }
 
   async restoreRecovery() {
@@ -514,6 +514,8 @@ class Controller {
   async menu(id: string) {
     const typing = isTyping();
     switch (id) {
+      case "new_sprite":
+        return setEditor({ newArtboardOpen: true });
       case "new":
         return setEditor({ newDocOpen: true });
       case "open":

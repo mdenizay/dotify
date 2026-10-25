@@ -25,6 +25,7 @@ export function TopBar() {
   const artboardName = useEditor((s) => s.session?.summary.name ?? "");
   const mode = useEditor((s) => s.mode);
   const libraryOpen = useEditor((s) => s.libraryOpen);
+  const spriteCount = useEditor((s) => s.session?.project.artboards.length ?? 0);
   const dirty = useEditor((s) => s.session?.summary.dirty ?? false);
   const canUndo = useEditor((s) => s.session?.summary.can_undo ?? false);
   const canRedo = useEditor((s) => s.session?.summary.can_redo ?? false);
@@ -44,14 +45,19 @@ export function TopBar() {
       className="flex h-[38px] shrink-0 items-center gap-1 border-b border-line bg-panel pr-2 pl-[84px]"
     >
       <div data-tauri-drag-region className="flex min-w-0 items-center gap-1.5 pr-2">
-        <IconButton
-          label={libraryOpen ? "Hide library" : "Show library"}
-          shortcut="⇧⌘L"
-          active={libraryOpen}
+        <button
+          type="button"
+          aria-pressed={libraryOpen}
+          title={`${libraryOpen ? "Hide" : "Show"} the Sprites panel (⇧⌘L)`}
           onClick={() => setEditor({ libraryOpen: !libraryOpen })}
+          className={`inline-flex h-6 shrink-0 items-center gap-1.5 rounded-[5px] px-1.5 text-[12px] transition-colors ${
+            libraryOpen ? "bg-accent-soft text-accent" : "text-dim hover:bg-hover hover:text-fg"
+          }`}
         >
           <PanelLeft size={15} strokeWidth={1.75} />
-        </IconButton>
+          Sprites
+          <span className="font-mono text-[10px] tabular-nums opacity-70">{spriteCount}</span>
+        </button>
         <span data-tauri-drag-region className="truncate pl-1 text-[12px] font-medium">
           {fileName}
         </span>
@@ -67,14 +73,14 @@ export function TopBar() {
       <Divider />
       <div role="group" aria-label="View" className="flex items-center gap-0.5">
         <IconButton
-          label="Edit artboard"
+          label="Edit sprite"
           active={mode === "editor"}
           onClick={() => controller.setMode("editor")}
         >
           <PenLine size={14} strokeWidth={1.75} />
         </IconButton>
         <IconButton
-          label="Artboard overview"
+          label="Sprite overview"
           shortcut="⇧⌘O"
           active={mode === "overview"}
           onClick={() => controller.setMode("overview")}
@@ -178,7 +184,7 @@ export function TopBar() {
         <Download size={15} strokeWidth={1.75} />
       </IconButton>
       <IconButton
-        label="Export all artboards"
+        label="Export all sprites"
         shortcut="⌥⌘E"
         onClick={() => setEditor({ exportAllOpen: true })}
       >

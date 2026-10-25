@@ -32,7 +32,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     let file = SubmenuBuilder::new(app, "File")
-        .item(&item(app, "new", "New…", Some("CmdOrCtrl+N"))?)
+        .item(&item(app, "new_sprite", "New Sprite…", Some("CmdOrCtrl+N"))?)
+        .item(&item(app, "new", "New Project…", Some("CmdOrCtrl+Shift+N"))?)
         .item(&item(app, "open", "Open…", Some("CmdOrCtrl+O"))?)
         .separator()
         .item(&item(app, "save", "Save", Some("CmdOrCtrl+S"))?)
@@ -40,7 +41,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .separator()
         .item(&item(app, "export_png", "Export…", Some("CmdOrCtrl+E"))?)
         .item(&item(app, "export_godot", "Export for Godot…", Some("CmdOrCtrl+Shift+E"))?)
-        .item(&item(app, "export_all", "Export All Artboards…", Some("CmdOrCtrl+Alt+E"))?)
+        .item(&item(app, "export_all", "Export All Sprites…", Some("CmdOrCtrl+Alt+E"))?)
         .separator()
         .item(&item(app, "close", "Close Window", Some("CmdOrCtrl+W"))?)
         .build()?;
@@ -61,7 +62,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&item(app, "zoom_actual", "Actual Size", Some("CmdOrCtrl+1"))?)
         .item(&item(app, "zoom_fit", "Fit to Window", Some("CmdOrCtrl+0"))?)
         .separator()
-        .item(&item(app, "toggle_overview", "Artboard Overview", Some("CmdOrCtrl+Shift+O"))?)
+        .item(&item(app, "toggle_overview", "Sprite Overview", Some("CmdOrCtrl+Shift+O"))?)
         .item(&item(app, "toggle_library", "Show Library", Some("CmdOrCtrl+Shift+L"))?)
         .separator()
         .item(&item(app, "toggle_grid", "Show Pixel Grid", Some("CmdOrCtrl+'"))?)

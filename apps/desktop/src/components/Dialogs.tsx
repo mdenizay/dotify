@@ -39,7 +39,7 @@ export function NewArtboardDialog() {
   const active = s.session?.project.artboards.find((a) => a.id === s.session?.active_artboard);
   return (
     <SpriteForm
-      title="New Artboard"
+      title="New Sprite"
       initialName=""
       namePlaceholder="Sprite name"
       initialSize={active ? { width: active.width, height: active.height } : undefined}
@@ -407,7 +407,7 @@ export function ExportAllDialog() {
     void controller.exportAll(godot);
   };
   return (
-    <Dialog title="Export All Artboards" onClose={close} width={320}>
+    <Dialog title="Export All Sprites" onClose={close} width={320}>
       <div className="flex flex-col gap-3">
         <div role="tablist" className="flex gap-1 rounded-md border border-line p-0.5">
           {(["png", "godot"] as const).map((k) => (
@@ -427,8 +427,8 @@ export function ExportAllDialog() {
         </div>
         <div className="text-dim">
           {godot
-            ? `A spritesheet, SpriteFrames .tres and .json for each of the ${count} artboards, using the spritesheet settings from Export.`
-            : `First frame of each of the ${count} artboards as PNG.`}{" "}
+            ? `A spritesheet, SpriteFrames .tres and .json for each of the ${count} sprites, using the spritesheet settings from Export.`
+            : `First frame of each of the ${count} sprites as PNG.`}{" "}
           One sub-folder per library folder.
         </div>
         <div className="flex flex-wrap gap-1">
