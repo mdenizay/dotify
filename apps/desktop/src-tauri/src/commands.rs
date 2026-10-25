@@ -25,7 +25,7 @@ pub struct CmdError {
 }
 
 impl CmdError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self { code: code.into(), message: message.into() }
     }
 }
@@ -48,7 +48,7 @@ impl From<dotify_export::ExportError> for CmdError {
     }
 }
 
-type CmdResult<T> = Result<T, CmdError>;
+pub(crate) type CmdResult<T> = Result<T, CmdError>;
 
 /// Keep the native window title in sync with the project.
 fn sync_title(app: &AppHandle, session: &Session) {

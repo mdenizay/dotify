@@ -11,6 +11,7 @@ pub mod geometry;
 pub mod image;
 pub mod model;
 mod ops;
+pub mod palette_io;
 pub mod png_io;
 pub mod project;
 pub mod raster;

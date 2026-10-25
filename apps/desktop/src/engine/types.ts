@@ -263,6 +263,11 @@ export interface GodotFiles {
   json: string;
 }
 
+/** A palette in the library (src-tauri/src/palettes.rs). */
+export interface LibraryPalette extends Palette {
+  builtin: boolean;
+}
+
 export interface RecoveryInfo {
   name: string;
   original_path: string | null;
